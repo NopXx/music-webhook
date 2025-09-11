@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # Music Webhook Server
+  music-webhook:
+    build: .
+    container_name: music-webhook-server
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - MONGODB_URI=mongodb://mongodb:27017/music-scrobbler
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-default-webhook-secret}
+      - API_KEY=${API_KEY:-default-api-key}
+      - NODE_ENV=production
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - music-webhook-network
+
+  # MongoDB Database
+  mongodb:
+    image: mongo:7
+    container_name: music-webhook-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=music-scrobbler
+    volumes:
+      - mongodb_data:/data/db
+      - ./docker/mongo-init:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    networks:
+      - music-webhook-network
+    command: mongod --quiet --logpath /dev/null
+
+  # MongoDB Express (Web UI for MongoDB)
+  mongo-express:
+    image: mongo-express:latest
+    container_name: music-webhook-mongo-express
+    ports:
+      - "8081:8081"
+    environment:
+      - ME_CONFIG_MONGODB_SERVER=mongodb
+      - ME_CONFIG_MONGODB_PORT=27017
+      - ME_CONFIG_MONGODB_DATABASE=music-scrobbler
+      - ME_CONFIG_BASICAUTH_USERNAME=admin
+      - ME_CONFIG_BASICAUTH_PASSWORD=admin123
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+    networks:
+      - music-webhook-network
+
+volumes:
+  mongodb_data:
+    driver: local
+
+networks:
+  music-webhook-network:
+    driver: bridge
