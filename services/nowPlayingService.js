@@ -116,11 +116,11 @@ class NowPlayingService {
     const type = (trackData.eventType || '').toLowerCase();
     if (!trackData.title || !trackData.artist) return; // ignore invalid
 
-    if (type === 'nowplaying' || type === 'resumed') {
+    if (type === 'nowplaying' || type === 'resumed' || type === 'resumedplaying' || type === 'scrobble') {
       this.setPlaying(trackData);
     } else if (type === 'paused') {
       this.setPaused(trackData);
-    } else if (type === 'stopped' || type === 'scrobble') {
+    } else if (type === 'stopped') {
       this.setStopped(trackData);
     }
   }

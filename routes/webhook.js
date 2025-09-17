@@ -74,11 +74,14 @@ export class WebhookRoutes {
         }, 100); // รอ 100ms ให้ response ออกไปก่อน
       }
       
+      const message = savedTrack.action === 'created' ? 'Track saved successfully' :
+                      savedTrack.action === 'updated' ? 'Track updated successfully' :
+                      (savedTrack.action === 'ignored' && savedTrack.eventType !== 'scrobble') ? `Now playing status updated to ${savedTrack.eventType}` :
+                      'Track already exists';
+
       res.status(200).json({ 
         success: true, 
-        message: savedTrack.action === 'created' ? 'Track saved successfully' : 
-                savedTrack.action === 'updated' ? 'Track updated successfully' : 
-                (savedTrack.action === 'ignored' ? 'Event ignored (non-scrobble)' : 'Track already exists'),
+        message: message,
         trackId: savedTrack._id,
         action: savedTrack.action,
         spotify_configured: spotifyService.isConfigured(),
