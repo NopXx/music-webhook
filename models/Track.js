@@ -1,5 +1,16 @@
 import mongoose from 'mongoose';
 
+const SOURCE_VALUES = [
+  'web-scrobbler',
+  'last.fm',
+  'spotify',
+  'apple-music',
+  'listenbrainz',
+  'listenbrainz-import',
+  'listenbrainz lastfm importer v2',
+  'other'
+];
+
 const trackSchema = new mongoose.Schema({
   // Track information
   title: {
@@ -42,7 +53,8 @@ const trackSchema = new mongoose.Schema({
   },
   source: {
     type: String,
-    enum: ['web-scrobbler', 'last.fm', 'spotify', 'apple-music', 'other'],
+    trim: true,
+    lowercase: true,
     default: 'web-scrobbler',
   },
   scrobbledAt: {
@@ -305,6 +317,59 @@ trackSchema.statics.findOrCreateTrack = async function(trackData) {
   const metadata = songRoot?.metadata || {};
   const connectorInfo = songRoot?.connector || {};
 
+  const normalizeDate = (value) => {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isFinite(date.getTime()) ? date : null;
+  };
+
+  const normalizeSource = (value) => {
+    if (!value) return 'web-scrobbler';
+    const normalized = value.toString().trim().toLowerCase();
+    return SOURCE_VALUES.includes(normalized) ? normalized : 'other';
+  };
+
+  const deriveTrackArtUrl = (rawPayload, existingUrl = null) => {
+    if (existingUrl && typeof existingUrl === 'string' && existingUrl.trim().length > 0) {
+      return existingUrl;
+    }
+    if (!rawPayload || typeof rawPayload !== 'object') {
+      return existingUrl;
+    }
+
+    const trackMetadata = rawPayload.track_metadata || rawPayload.trackMetadata || {};
+    const additionalInfo = trackMetadata.additional_info || trackMetadata.additionalInfo || {};
+    const mapping = trackMetadata.mbid_mapping || trackMetadata.mbidMapping || {};
+
+    const candidates = [
+      additionalInfo.cover_art_url,
+      additionalInfo.coverart,
+      additionalInfo.album_art_url,
+      additionalInfo.album_coverart_url,
+      additionalInfo.track_art_url,
+      additionalInfo.image,
+      additionalInfo.image_url,
+      rawPayload.trackArtUrl, // fallback if importer placed it at root
+    ].filter((candidate) => typeof candidate === 'string' && candidate.trim().length > 0);
+
+    if (candidates.length > 0) {
+      return candidates[0];
+    }
+
+    const releaseForCover = mapping.caa_release_mbid || mapping.release_mbid;
+    if (releaseForCover) {
+      if (mapping.caa_id) {
+        return `https://coverartarchive.org/release/${releaseForCover}/${mapping.caa_id}.jpg`;
+      }
+      return `https://coverartarchive.org/release/${releaseForCover}/front`;
+    }
+
+    return existingUrl;
+  };
+
+  const normalizedTimestamp = normalizeDate(trackData?.timestamp) || new Date();
+  const normalizedScrobbledAt = normalizeDate(trackData?.scrobbledAt) || normalizedTimestamp;
+
   const data = {
     // Core identity: strictly prefer processed
     title: processed.track ?? parsed.track ?? trackData?.title,
@@ -341,15 +406,25 @@ trackSchema.statics.findOrCreateTrack = async function(trackData) {
       : trackData?.startTimestamp,
 
     // Scrobble timing
-    scrobbledAt: new Date(),
+    timestamp: normalizedTimestamp,
+    scrobbledAt: normalizedScrobbledAt,
 
     // Flags / status
     isScrobbled: true,
     eventType,
+    source: normalizeSource(trackData?.source),
 
     // Keep the raw webhook for debugging / audits
     rawData: trackData?.rawData || trackData,
+    lastfmMbid: trackData?.lastfmMbid ?? undefined,
   };
+
+  if (!data.trackArtUrl) {
+    const derivedArt = deriveTrackArtUrl(trackData?.rawData || trackData, null);
+    if (derivedArt) {
+      data.trackArtUrl = derivedArt;
+    }
+  }
 
   // Validate required identity after normalization
   if (!data.artist || !data.title) {

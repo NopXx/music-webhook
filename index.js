@@ -123,6 +123,14 @@ class MusicWebhookServer {
     this.app.get('/api/tracks', asyncHandler(webhookRoutes.getRecentTracks));
     this.app.get('/api/nowplaying', asyncHandler(webhookRoutes.getNowPlaying));
     this.app.post('/api/nowplaying/playing', validateContentType, asyncHandler(webhookRoutes.setNowPlaying));
+    this.app.get('/import/listenbrainz', webhookRoutes.renderListenBrainzImportPage);
+    this.app.post('/api/import/listenbrainz',
+      validateContentType,
+      asyncHandler(webhookRoutes.importListenBrainz)
+    );
+    this.app.delete('/api/tracks/range',
+      asyncHandler(webhookRoutes.deleteTracksByDateRange)
+    );
     
     // Duplicate management endpoints
     this.app.get('/api/duplicates', asyncHandler(webhookRoutes.getDuplicateStats));
@@ -147,6 +155,9 @@ class MusicWebhookServer {
           'POST /api/nowplaying/playing': 'Set or refresh now playing status',
           'GET /api/health': 'Health check',
           'POST /webhook/scrobble': 'Submit scrobble data',
+          'GET /import/listenbrainz': 'ListenBrainz import UI',
+          'POST /api/import/listenbrainz': 'Bulk import ListenBrainz JSON/JSONL payloads',
+          'DELETE /api/tracks/range': 'Delete tracks by scrobbledAt date range',
           'GET /api/spotify/status': 'Get Spotify integration status',
           'GET /api/spotify/stats': 'Get Spotify enrichment statistics',
           'POST /api/spotify/enrich': 'Manually enrich tracks with Spotify data',

@@ -1,6 +1,7 @@
 import Track from '../models/Track.js';
 import spotifyService from '../services/spotifyService.js';
 import nowPlayingService from '../services/nowPlayingService.js';
+import { normalizeListenBrainzEntry } from '../middleware/validation.js';
 
 export class WebhookRoutes {
   constructor() {
@@ -17,6 +18,9 @@ export class WebhookRoutes {
     this.updateMissingSpotifyData = this.updateMissingSpotifyData.bind(this);
     this.getNowPlaying = this.getNowPlaying.bind(this);
     this.setNowPlaying = this.setNowPlaying.bind(this);
+    this.renderListenBrainzImportPage = this.renderListenBrainzImportPage.bind(this);
+    this.importListenBrainz = this.importListenBrainz.bind(this);
+    this.deleteTracksByDateRange = this.deleteTracksByDateRange.bind(this);
   }
 
   // Middleware to validate webhook secret
@@ -49,10 +53,25 @@ export class WebhookRoutes {
       const trackData = this.parseScrobbleData(body, req, validatedTrack);
 
       // Update in-memory Now Playing status for any event
-      try {
-        nowPlayingService.updateFromEvent(trackData);
-      } catch (npErr) {
-        console.warn('⚠️ Failed to update Now Playing state:', npErr?.message || npErr);
+      const shouldUpdateNowPlaying = (() => {
+        if (trackData?.source !== 'listenbrainz') return true;
+        const eventTimestamp = trackData?.timestamp instanceof Date
+          ? trackData.timestamp
+          : (trackData?.timestamp ? new Date(trackData.timestamp) : null);
+        if (!eventTimestamp || !Number.isFinite(eventTimestamp.getTime())) {
+          return false;
+        }
+        const ageMs = Date.now() - eventTimestamp.getTime();
+        const maxAgeMs = 5 * 60 * 1000; // 5 minutes tolerance
+        return Math.abs(ageMs) <= maxAgeMs;
+      })();
+
+      if (shouldUpdateNowPlaying) {
+        try {
+          nowPlayingService.updateFromEvent(trackData);
+        } catch (npErr) {
+          console.warn('⚠️ Failed to update Now Playing state:', npErr?.message || npErr);
+        }
       }
       
       // Use findOrCreateTrack to avoid duplicates
@@ -96,6 +115,10 @@ export class WebhookRoutes {
           eventType: savedTrack.eventType,
           userPlayCount: savedTrack.userPlayCount,
           timestamp: savedTrack.timestamp,
+          trackArtUrl: savedTrack.trackArtUrl,
+          artistUrl: savedTrack.artistUrl,
+          albumUrl: savedTrack.albumUrl,
+          originalUrl: savedTrack.originalUrl,
           spotify_enriched: savedTrack.spotify_enriched,
           spotify_data: savedTrack.spotify_enriched ? {
             spotify_id: savedTrack.spotify?.id,
@@ -189,69 +212,53 @@ export class WebhookRoutes {
     }
   }
 
-  // Parse scrobble data from various formats
-  parseScrobbleData(body, req, validatedTrack = null) {
-    const userAgent = req.headers['user-agent'] || '';
-    const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
+  buildTrackDataFromValidated(body, context = {}, validatedTrack = null) {
+    if (!validatedTrack) return null;
 
-    // Use validated track data if available
-    if (validatedTrack) {
-      // Extract metadata from web-scrobbler new format
-      let metadata = {};
-      let flags = {};
-      
-      if (body.eventName && body.data && body.data.song) {
-        const song = body.data.song;
-        
-        // Extract metadata
-        if (song.metadata) {
-          metadata = {
-            userPlayCount: song.metadata.userPlayCount || null,
-            trackArtUrl: song.metadata.trackArtUrl || null,
-            artistUrl: song.metadata.artistUrl || null,
-            trackUrl: song.metadata.trackUrl || null,
-            albumUrl: song.metadata.albumUrl || null,
-            isLovedInService: song.metadata.userloved || false,
-            startTimestamp: song.metadata.startTimestamp ? new Date(song.metadata.startTimestamp * 1000) : null,
-          };
-        }
-        
-        // Extract flags
-        if (song.flags) {
-          flags = {
-            isScrobbled: song.flags.isScrobbled || false,
-            isCorrectedByUser: song.flags.isCorrectedByUser || false,
-            isValid: song.flags.isValid !== false, // Default to true
-          };
-        }
-        
-        // Extract timing info
-        const trackData = song.parsed || song.processed || {};
-        metadata.currentTime = trackData.currentTime || null;
-      }
-      
-      return {
+    const userAgent = context.userAgent || '';
+    const ipAddress = context.ipAddress || 'unknown';
+
+    if ((validatedTrack.rawFormat || '').toLowerCase() === 'listenbrainz-import') {
+      const trackMetadata = body.track_metadata || {};
+      const mapping = trackMetadata.mbid_mapping || {};
+      const additionalInfo = trackMetadata.additional_info || {};
+
+      const listenedAt = validatedTrack.listenedAt instanceof Date
+        ? validatedTrack.listenedAt
+        : (validatedTrack.listenedAt ? new Date(validatedTrack.listenedAt) : null);
+      const insertedAt = validatedTrack.insertedAt instanceof Date
+        ? validatedTrack.insertedAt
+        : (validatedTrack.insertedAt ? new Date(validatedTrack.insertedAt) : null);
+      const timestamp = listenedAt || (validatedTrack.timestamp ? new Date(validatedTrack.timestamp) : new Date());
+
+      const trackData = {
         title: validatedTrack.title,
         artist: validatedTrack.artist,
-        album: validatedTrack.album || '',
+        album: validatedTrack.album || trackMetadata.release_name || '',
         albumArtist: '',
         genre: '',
         year: null,
         trackNumber: null,
         duration: validatedTrack.duration,
-        timestamp: validatedTrack.timestamp ? new Date(validatedTrack.timestamp) : new Date(),
-        source: 'web-scrobbler',
-        connector: validatedTrack.connector,
-        originalUrl: validatedTrack.originalUrl,
-        
-        // Metadata from web-scrobbler
-        ...metadata,
-        ...flags,
-        
-        // Event information
-        eventType: validatedTrack.eventName || 'unknown',
-        
-        // Technical info
+        timestamp,
+        source: validatedTrack.source || 'listenbrainz',
+        connector: validatedTrack.connector || 'listenbrainz',
+        originalUrl: validatedTrack.originalUrl || additionalInfo.listen_url || additionalInfo.track_url || '',
+        trackArtUrl: validatedTrack.trackArtUrl
+          || additionalInfo.cover_art_url
+          || additionalInfo.coverart
+          || additionalInfo.album_art_url
+          || additionalInfo.album_coverart_url
+          || additionalInfo.track_art_url
+          || additionalInfo.image
+          || additionalInfo.image_url
+          || (mapping.caa_release_mbid || mapping.release_mbid
+            ? (mapping.caa_id
+              ? `https://coverartarchive.org/release/${mapping.caa_release_mbid || mapping.release_mbid}/${mapping.caa_id}.jpg`
+              : `https://coverartarchive.org/release/${mapping.caa_release_mbid || mapping.release_mbid}/front`)
+            : null),
+        scrobbledAt: listenedAt || insertedAt || timestamp,
+        eventType: validatedTrack.eventName || 'scrobble',
         userAgent,
         ipAddress,
         rawData: {
@@ -260,6 +267,94 @@ export class WebhookRoutes {
           eventName: validatedTrack.eventName
         }
       };
+
+      if (additionalInfo.lastfm_track_mbid) {
+        trackData.lastfmMbid = additionalInfo.lastfm_track_mbid;
+      }
+
+      trackData.musicbrainz = {
+        recordingMbid: mapping.recording_mbid || null,
+        releaseMbid: mapping.release_mbid || null,
+        caaId: mapping.caa_id || null,
+        caaReleaseMbid: mapping.caa_release_mbid || null,
+        recordingMsid: trackMetadata.recording_msid || null,
+        artistMbids: mapping.artist_mbids || null
+      };
+
+      return trackData;
+    }
+
+    let metadata = {};
+    let flags = {};
+
+    if (body.eventName && body.data && body.data.song) {
+      const song = body.data.song;
+
+      if (song.metadata) {
+        metadata = {
+          userPlayCount: song.metadata.userPlayCount || null,
+          trackArtUrl: song.metadata.trackArtUrl || null,
+          artistUrl: song.metadata.artistUrl || null,
+          trackUrl: song.metadata.trackUrl || null,
+          albumUrl: song.metadata.albumUrl || null,
+          isLovedInService: song.metadata.userloved || false,
+          startTimestamp: song.metadata.startTimestamp ? new Date(song.metadata.startTimestamp * 1000) : null,
+        };
+      }
+
+      if (song.flags) {
+        flags = {
+          isScrobbled: song.flags.isScrobbled || false,
+          isCorrectedByUser: song.flags.isCorrectedByUser || false,
+          isValid: song.flags.isValid !== false,
+        };
+      }
+
+      const trackData = song.parsed || song.processed || {};
+      metadata.currentTime = trackData.currentTime || null;
+    }
+
+    return {
+      title: validatedTrack.title,
+      artist: validatedTrack.artist,
+      album: validatedTrack.album || '',
+      albumArtist: '',
+      genre: '',
+      year: null,
+      trackNumber: null,
+      duration: validatedTrack.duration,
+      timestamp: validatedTrack.timestamp ? new Date(validatedTrack.timestamp) : new Date(),
+      source: validatedTrack.source || 'web-scrobbler',
+      connector: validatedTrack.connector,
+      originalUrl: validatedTrack.originalUrl,
+      ...metadata,
+      ...flags,
+      eventType: validatedTrack.eventName || 'unknown',
+      userAgent,
+      ipAddress,
+      rawData: {
+        ...body,
+        format: validatedTrack.rawFormat,
+        eventName: validatedTrack.eventName
+      }
+    };
+  }
+
+  // Parse scrobble data from various formats
+  parseScrobbleData(body, req, validatedTrack = null) {
+    const userAgent = req.headers['user-agent'] || '';
+    const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
+
+    // Use validated track data if available
+    if (validatedTrack) {
+      const trackData = this.buildTrackDataFromValidated(
+        body,
+        { userAgent, ipAddress },
+        validatedTrack
+      );
+      if (trackData) {
+        return trackData;
+      }
     }
 
     // Fallback to legacy parsing (for backward compatibility)
@@ -355,6 +450,740 @@ export class WebhookRoutes {
     }
 
     return trackData;
+  }
+
+  renderListenBrainzImportPage(req, res) {
+    res.type('html').send(`<!DOCTYPE html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <title>ListenBrainz Import UI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f172a;
+        --surface: rgba(30, 41, 59, 0.85);
+        --surface-alt: rgba(15, 23, 42, 0.7);
+        --border: rgba(148, 163, 184, 0.3);
+        --accent: #38bdf8;
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --danger: #fb7185;
+        --success: #34d399;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+        background: linear-gradient(135deg, var(--bg), #020617);
+        color: var(--text);
+        padding: 2.5rem 1.5rem 4rem;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        padding: 2.5rem 2rem 3rem;
+        backdrop-filter: blur(24px);
+        box-shadow: 0 40px 60px -24px rgba(15, 23, 42, 0.65);
+      }
+      header h1 {
+        margin: 0;
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      header p {
+        margin: 0.5rem 0 0;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      section {
+        margin-top: 2rem;
+      }
+      label {
+        display: inline-block;
+        margin-bottom: 0.75rem;
+        font-weight: 600;
+        color: #bae6fd;
+        letter-spacing: 0.01em;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+      }
+      textarea {
+        width: 100%;
+        min-height: 260px;
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        padding: 1rem 1.25rem;
+        resize: vertical;
+        background: var(--surface-alt);
+        color: var(--text);
+        font-family: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', monospace;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+      textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+        margin-top: 1rem;
+      }
+      .btn {
+        position: relative;
+        border: none;
+        border-radius: 999px;
+        padding: 0.75rem 1.5rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.65;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #0f172a;
+        box-shadow: 0 12px 30px -12px rgba(56, 189, 248, 0.6);
+      }
+      .btn-primary:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 15px 35px -12px rgba(56, 189, 248, 0.75);
+      }
+      .btn-secondary {
+        background: rgba(148, 163, 184, 0.12);
+        color: var(--text);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        transform: translateY(-2px);
+        border-color: rgba(148, 163, 184, 0.35);
+      }
+      input[type="file"] {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin-top: 0.5rem;
+      }
+      .stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin: 1.5rem 0;
+      }
+      .stat-card {
+        flex: 1 1 180px;
+        background: rgba(15, 23, 42, 0.55);
+        border: 1px solid rgba(56, 189, 248, 0.15);
+        border-radius: 20px;
+        padding: 1.25rem;
+      }
+      .stat-card h3 {
+        margin: 0 0 0.25rem;
+        font-size: 2rem;
+      }
+      .stat-card span {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .alert {
+        margin-top: 1.5rem;
+        padding: 1rem 1.25rem;
+        border-radius: 16px;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        background: rgba(15, 23, 42, 0.55);
+      }
+      .alert.success {
+        border-color: rgba(52, 211, 153, 0.45);
+        color: var(--success);
+      }
+      .alert.error {
+        border-color: rgba(251, 113, 133, 0.45);
+        color: var(--danger);
+      }
+      .result-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1.5rem;
+        border-radius: 18px;
+        overflow: hidden;
+      }
+      .result-table thead {
+        background: rgba(56, 189, 248, 0.1);
+      }
+      .result-table th, .result-table td {
+        padding: 0.85rem 1rem;
+        text-align: left;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+      }
+      .result-table tbody tr:hover {
+        background: rgba(56, 189, 248, 0.05);
+      }
+      pre {
+        margin: 0.75rem 0 0;
+        padding: 0.75rem 1rem;
+        border-radius: 12px;
+        background: rgba(15, 23, 42, 0.7);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        color: var(--muted);
+        overflow-x: auto;
+      }
+      footer {
+        margin-top: 3rem;
+        text-align: center;
+        color: rgba(148, 163, 184, 0.6);
+        font-size: 0.85rem;
+      }
+      @media (max-width: 720px) {
+        main {
+          padding: 1.75rem 1.25rem 2.25rem;
+        }
+        header h1 {
+          font-size: 1.65rem;
+        }
+        .controls {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .controls .btn, .controls input[type="file"] {
+          width: 100%;
+          justify-content: center;
+        }
+        textarea {
+          min-height: 200px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>นำเข้าข้อมูลจาก ListenBrainz</h1>
+        <p>รองรับ JSON ปกติหรือ JSON Lines ที่ได้จาก ListenBrainz / Last.fm importer – ระบบจะเรียกใช้ webhook parser เดิมทุกขั้นตอน</p>
+      </header>
+
+      <section>
+        <form id="import-form">
+          <label for="payload">วางข้อมูล JSON หรือ JSON Lines</label>
+          <textarea id="payload" name="payload" placeholder='{"inserted_at": ..., "listened_at": ..., "track_metadata": {...}}'></textarea>
+          <div class="hint" id="entry-count">จำนวนเอนทรี: 0</div>
+
+          <div class="controls">
+            <button type="submit" class="btn btn-primary" id="import-btn">🚀 นำเข้า</button>
+            <button type="button" class="btn btn-secondary" id="sample-btn">เติมตัวอย่าง</button>
+            <label class="btn btn-secondary" for="file-input">📁 เลือกไฟล์</label>
+            <input type="file" id="file-input" accept=".json,.jsonl,.txt" style="display:none" />
+            <button type="button" class="btn btn-secondary" id="clear-btn">ล้างข้อมูล</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="status-block" style="display:none;">
+        <div class="stats">
+          <div class="stat-card">
+            <h3 id="stat-total">0</h3>
+            <span>รับเข้ามาทั้งหมด</span>
+          </div>
+          <div class="stat-card">
+            <h3 id="stat-created">0</h3>
+            <span>สร้างใหม่</span>
+          </div>
+          <div class="stat-card">
+            <h3 id="stat-updated">0</h3>
+            <span>อัปเดต</span>
+          </div>
+          <div class="stat-card">
+            <h3 id="stat-skipped">0</h3>
+            <span>ข้าม/ซ้ำ</span>
+          </div>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <div id="errors-container" style="display:none;">
+          <h3>รายการที่ผิดพลาด</h3>
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>ตำแหน่ง</th>
+                <th>รายละเอียด</th>
+              </tr>
+            </thead>
+            <tbody id="error-rows"></tbody>
+          </table>
+        </div>
+
+        <div id="items-container" style="display:none;">
+          <h3>ตัวอย่างรายการล่าสุด</h3>
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>สถานะ</th>
+                <th>ศิลปิน - เพลง</th>
+                <th>อัลบั้ม</th>
+                <th>เวลา</th>
+              </tr>
+            </thead>
+            <tbody id="item-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer>
+        ListenBrainz Import UI · ข้อมูลทั้งหมดจะถูกประมวลผลผ่านเส้นทาง /api/import/listenbrainz
+      </footer>
+    </main>
+
+    <script>
+      const textarea = document.getElementById('payload');
+      const fileInput = document.getElementById('file-input');
+      const form = document.getElementById('import-form');
+      const importBtn = document.getElementById('import-btn');
+      const statusBlock = document.getElementById('status-block');
+      const entryCount = document.getElementById('entry-count');
+      const alertContainer = document.getElementById('alert-container');
+      const errorContainer = document.getElementById('errors-container');
+      const errorRows = document.getElementById('error-rows');
+      const itemsContainer = document.getElementById('items-container');
+      const itemRows = document.getElementById('item-rows');
+      const statTotal = document.getElementById('stat-total');
+      const statCreated = document.getElementById('stat-created');
+      const statUpdated = document.getElementById('stat-updated');
+      const statSkipped = document.getElementById('stat-skipped');
+
+      const samplePayload = '{\\n  "inserted_at": 1759922716.660063,\\n  "listened_at": 1733035913,\\n  "track_metadata": {\\n    "track_name": "Supernova Love",\\n    "artist_name": "IVE & David Guetta",\\n    "mbid_mapping": {\\n      "caa_id": 40393843035,\\n      "artists": [\\n        {\\n          "artist_mbid": "b2f2216a-d7a9-4ce0-8b8f-f494d9a8c196",\\n          "join_phrase": " & ",\\n          "artist_credit_name": "IVE"\\n        },\\n        {\\n          "artist_mbid": "302bd7b9-d012-4360-897a-93b00c855680",\\n          "join_phrase": "",\\n          "artist_credit_name": "David Guetta"\\n        }\\n      ],\\n      "artist_mbids": [\\n        "b2f2216a-d7a9-4ce0-8b8f-f494d9a8c196",\\n        "302bd7b9-d012-4360-897a-93b00c855680"\\n      ],\\n      "release_mbid": "d7a8fdca-a620-4517-819b-79b0ba4671ab",\\n      "recording_mbid": "f28e2528-210a-44c6-96e0-031d5c29cf85",\\n      "recording_name": "Supernova Love",\\n      "caa_release_mbid": "1097924e-b972-471e-927f-cb2e443387e4"\\n    },\\n    "release_name": "Supernova Love",\\n    "recording_msid": "60ce36d4-d91e-4e42-95da-c0574b1f3405",\\n    "additional_info": {\\n      "lastfm_track_mbid": "f28e2528-210a-44c6-96e0-031d5c29cf85",\\n      "submission_client": "ListenBrainz lastfm importer v2"\\n    }\\n  }\\n}\\n';
+
+      function countEntries(text) {
+        const trimmed = text.trim();
+        if (!trimmed) return 0;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) return parsed.length;
+          if (parsed && typeof parsed === 'object') return 1;
+        } catch (err) {
+          const lines = trimmed.split(/\\r?\\n/).map((line) => line.trim()).filter(Boolean);
+          return lines.length;
+        }
+        return 0;
+      }
+
+      function setLoading(isLoading) {
+        importBtn.disabled = isLoading;
+        importBtn.textContent = isLoading ? '⏳ กำลังนำเข้า...' : '🚀 นำเข้า';
+      }
+
+      function resetOutput() {
+        alertContainer.innerHTML = '';
+        errorContainer.style.display = 'none';
+        errorRows.innerHTML = '';
+        itemsContainer.style.display = 'none';
+        itemRows.innerHTML = '';
+      }
+
+      function renderAlert(type, message) {
+        alertContainer.innerHTML = '<div class="alert ' + type + '">' + message + '</div>';
+      }
+
+      function appendErrorRow(index, source, message) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td>' + index + '</td><td>' + source + '</td><td>' + message + '</td>';
+        errorRows.appendChild(row);
+      }
+
+      function appendItemRow(status, track) {
+        const row = document.createElement('tr');
+        const displayStatus = status === 'created' ? '🆕 สร้างใหม่' : status === 'updated' ? '🔄 อัปเดต' : '⏭️ ข้าม';
+        const timestamp = track.timestamp ? new Date(track.timestamp).toLocaleString() : '-';
+        row.innerHTML = '<td>' + displayStatus + '</td><td>' + (track.artist || '-') + ' - ' + (track.title || '-') + '</td><td>' + (track.album || '-') + '</td><td>' + timestamp + '</td>';
+        itemRows.appendChild(row);
+      }
+
+      textarea.addEventListener('input', () => {
+        entryCount.textContent = 'จำนวนเอนทรี: ' + countEntries(textarea.value);
+      });
+
+      document.getElementById('sample-btn').addEventListener('click', () => {
+        textarea.value = samplePayload.trim();
+        entryCount.textContent = 'จำนวนเอนทรี: ' + countEntries(textarea.value);
+      });
+
+      document.getElementById('clear-btn').addEventListener('click', () => {
+        textarea.value = '';
+        entryCount.textContent = 'จำนวนเอนทรี: 0';
+        statusBlock.style.display = 'none';
+        resetOutput();
+      });
+
+      fileInput.addEventListener('change', (event) => {
+        const [file] = event.target.files;
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          textarea.value = reader.result;
+          entryCount.textContent = 'จำนวนเอนทรี: ' + countEntries(textarea.value);
+        };
+        reader.readAsText(file, 'utf-8');
+      });
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const raw = textarea.value.trim();
+        if (!raw) {
+          renderAlert('error', 'กรุณาวางข้อมูล JSON หรือ JSON Lines ก่อน');
+          statusBlock.style.display = 'block';
+          return;
+        }
+
+        setLoading(true);
+        resetOutput();
+
+        try {
+          const response = await fetch('/api/import/listenbrainz', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ raw })
+          });
+
+          const result = await response.json();
+          statusBlock.style.display = 'block';
+
+          statTotal.textContent = result.total ?? 0;
+          statCreated.textContent = result.created ?? 0;
+          statUpdated.textContent = result.updated ?? 0;
+          statSkipped.textContent = (result.skipped ?? 0) + (result.ignored ?? 0);
+
+          if (result.success) {
+            renderAlert('success', result.message || 'นำเข้าข้อมูลสำเร็จ');
+          } else {
+            renderAlert('error', result.message || 'นำเข้าบางส่วนสำเร็จ แต่มีข้อผิดพลาด');
+          }
+
+          if (Array.isArray(result.errors) && result.errors.length > 0) {
+            errorContainer.style.display = '';
+            result.errors.forEach((err, idx) => {
+              appendErrorRow(idx + 1, err.source || '-', err.message || 'ไม่ทราบสาเหตุ');
+            });
+          }
+
+          const previewItems = [];
+          if (result.items) {
+            ['created', 'updated', 'skipped'].forEach((key) => {
+              if (Array.isArray(result.items[key])) {
+                result.items[key].slice(0, 10).forEach((item) => previewItems.push({ status: key, ...item }));
+              }
+            });
+          }
+
+          if (previewItems.length > 0) {
+            itemsContainer.style.display = '';
+            previewItems.forEach((item) => appendItemRow(item.status, item));
+          }
+        } catch (error) {
+          statusBlock.style.display = 'block';
+          renderAlert('error', error?.message || 'เกิดข้อผิดพลาดระหว่างส่งข้อมูล');
+        } finally {
+          setLoading(false);
+        }
+      });
+    </script>
+  </body>
+</html>`);
+  }
+
+  async importListenBrainz(req, res) {
+    try {
+      const payload = req.body;
+      const entries = [];
+      const errors = [];
+
+      const pushEntry = (entry, source) => {
+        if (entry && typeof entry === 'object') {
+          entries.push({ entry, source });
+        } else {
+          errors.push({
+            source,
+            message: 'รายการที่ระบุไม่ใช่ JSON object'
+          });
+        }
+      };
+
+      const parseRawString = (text) => {
+        if (typeof text !== 'string') return;
+        const trimmed = text.trim();
+        if (!trimmed) {
+          errors.push({ source: 'raw', message: 'ไม่พบข้อมูลใน raw text' });
+          return;
+        }
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((item, idx) => pushEntry(item, `raw[${idx}]`));
+          } else if (parsed && typeof parsed === 'object') {
+            pushEntry(parsed, 'raw');
+          } else {
+            errors.push({ source: 'raw', message: 'ข้อมูล raw ควรเป็น JSON object หรือ array ของ object' });
+          }
+        } catch (err) {
+          const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+          if (lines.length === 0) {
+            errors.push({ source: 'raw', message: 'ไม่พบ JSON object ใน raw text' });
+            return;
+          }
+          lines.forEach((line, idx) => {
+            try {
+              const parsedLine = JSON.parse(line);
+              pushEntry(parsedLine, `raw line ${idx + 1}`);
+            } catch (lineErr) {
+              errors.push({
+                source: `raw line ${idx + 1}`,
+                message: lineErr?.message || 'ไม่สามารถแปลง JSON ได้'
+              });
+            }
+          });
+        }
+      };
+
+      if (Array.isArray(payload)) {
+        payload.forEach((entry, idx) => pushEntry(entry, `body[${idx}]`));
+      } else if (Array.isArray(payload?.entries)) {
+        payload.entries.forEach((entry, idx) => pushEntry(entry, `entries[${idx}]`));
+      } else if (typeof payload?.raw === 'string') {
+        parseRawString(payload.raw);
+      } else if (payload && typeof payload === 'object' && payload.track_metadata) {
+        pushEntry(payload, 'body');
+      } else if (payload && typeof payload === 'object' && Object.keys(payload).length > 0) {
+        errors.push({ source: 'body', message: 'รูปแบบข้อมูลไม่ตรงกับ ListenBrainz import' });
+      }
+
+      if (entries.length === 0) {
+        const message = errors.length
+          ? 'ไม่สามารถนำเข้าข้อมูลได้'
+          : 'ไม่พบข้อมูลสำหรับนำเข้า';
+        return res.status(400).json({
+          success: false,
+          message,
+          total: 0,
+          processed: 0,
+          created: 0,
+          updated: 0,
+          skipped: 0,
+          ignored: 0,
+          spotifyQueued: 0,
+          errors
+        });
+      }
+
+      const summary = {
+        total: entries.length,
+        processed: 0,
+        created: [],
+        updated: [],
+        skipped: [],
+        ignored: [],
+        spotifyQueued: 0,
+        errors
+      };
+
+      const context = {
+        userAgent: 'ListenBrainz Import UI',
+        ipAddress: req.ip || req.connection?.remoteAddress || 'listenbrainz-import-ui'
+      };
+
+      for (const { entry, source } of entries) {
+        try {
+          const normalized = normalizeListenBrainzEntry(entry);
+          const trackData = this.buildTrackDataFromValidated(entry, context, normalized);
+          if (!trackData) {
+            throw new Error('ไม่สามารถสร้างข้อมูล track จาก entry นี้ได้');
+          }
+
+          const savedTrack = await Track.findOrCreateTrack(trackData);
+          const action = savedTrack.action || (savedTrack.isNew ? 'created' : 'updated');
+
+          const preview = {
+            id: savedTrack._id,
+            title: savedTrack.title,
+            artist: savedTrack.artist,
+            album: savedTrack.album,
+            timestamp: savedTrack.timestamp,
+            connector: savedTrack.connector,
+            source: savedTrack.source,
+            trackArtUrl: savedTrack.trackArtUrl
+          };
+
+          if (action === 'created') {
+            summary.created.push(preview);
+          } else if (action === 'updated') {
+            summary.updated.push(preview);
+          } else if (action === 'ignored') {
+            summary.ignored.push(preview);
+          } else {
+            summary.skipped.push(preview);
+          }
+
+          const shouldEnrichWithSpotify =
+            (savedTrack.action === 'created' ||
+              (savedTrack.action === 'updated' && !savedTrack.spotify_search_attempted)) ||
+            (!savedTrack.spotify_search_attempted && savedTrack.eventType === 'scrobble');
+
+          if (shouldEnrichWithSpotify && spotifyService.isConfigured()) {
+            summary.spotifyQueued += 1;
+            setTimeout(() => {
+              this.enrichWithSpotifyData(savedTrack).catch((error) => {
+                console.error(`❌ Failed to enrich track ${savedTrack._id} during import:`, error.message);
+              });
+            }, 100);
+          }
+        } catch (error) {
+          summary.errors.push({
+            source,
+            message: error?.message || 'เกิดข้อผิดพลาดระหว่างนำเข้า'
+          });
+        }
+      }
+
+      summary.processed =
+        summary.created.length +
+        summary.updated.length +
+        summary.skipped.length +
+        summary.ignored.length;
+
+      const success = summary.errors.length === 0;
+      const message = success
+        ? 'นำเข้าข้อมูลสำเร็จ'
+        : (summary.processed > 0
+            ? 'นำเข้าบางส่วนสำเร็จ มีข้อผิดพลาดบางรายการ'
+            : 'ไม่สามารถนำเข้าข้อมูลได้');
+
+      const response = {
+        success,
+        message,
+        total: summary.total,
+        processed: summary.processed,
+        created: summary.created.length,
+        updated: summary.updated.length,
+        skipped: summary.skipped.length,
+        ignored: summary.ignored.length,
+        spotifyQueued: summary.spotifyQueued,
+        errors: summary.errors,
+        items: {
+          created: summary.created,
+          updated: summary.updated,
+          skipped: summary.skipped,
+          ignored: summary.ignored
+        }
+      };
+
+      const statusCode = success ? 200 : (summary.processed > 0 ? 207 : 400);
+      return res.status(statusCode).json(response);
+    } catch (error) {
+      console.error('❌ ListenBrainz import error:', error);
+      return res.status(500).json({
+        success: false,
+        message: error?.message || 'ไม่สามารถนำเข้าข้อมูลได้',
+        errors: [{ source: 'system', message: error?.message || 'Unknown error' }]
+      });
+    }
+  }
+
+  async deleteTracksByDateRange(req, res) {
+    try {
+      const { start, end, source, connector, dryRun } = req.query || {};
+
+      if (!start || !end) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing parameters',
+          message: 'ต้องระบุ start และ end (รูปแบบ ISO date เช่น 2024-01-01T00:00:00Z)'
+        });
+      }
+
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+
+      if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid date',
+          message: 'ค่า start หรือ end ไม่ใช่วันที่ที่ถูกต้อง'
+        });
+      }
+
+      if (endDate < startDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid range',
+          message: 'end ต้องมากกว่าหรือเท่ากับ start'
+        });
+      }
+
+      const filter = {
+        scrobbledAt: {
+          $gte: startDate,
+          $lte: endDate
+        }
+      };
+
+      if (source) {
+        filter.source = source;
+      }
+
+      if (connector) {
+        filter.connector = connector;
+      }
+
+      const totalMatches = await Track.countDocuments(filter);
+
+      if (String(dryRun).toLowerCase() === 'true') {
+        return res.status(200).json({
+          success: true,
+          message: 'Dry run: ไม่ได้ลบข้อมูล',
+          matches: totalMatches,
+          filter
+        });
+      }
+
+      const result = await Track.deleteMany(filter);
+
+      return res.status(200).json({
+        success: true,
+        message: `ลบข้อมูลสำเร็จ ${result.deletedCount} รายการ`,
+        deletedCount: result.deletedCount,
+        filter,
+        requestedRange: {
+          start: startDate.toISOString(),
+          end: endDate.toISOString()
+        },
+        totalMatchedBeforeDelete: totalMatches
+      });
+    } catch (error) {
+      console.error('❌ Error deleting tracks by date:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Internal error',
+        message: error?.message || 'เกิดข้อผิดพลาดระหว่างลบข้อมูล'
+      });
+    }
   }
 
   // Get statistics
@@ -1094,39 +1923,48 @@ export class WebhookRoutes {
       version: '1.0.0',
       framework: 'Express.js + Bun.js',
       features: [
-        'Duplicate prevention',
-        'Metadata storage',
-        'Multiple webhook formats',
-        'Duplicate management'
+        'Multiple webhook formats (Web Scrobbler, ListenBrainz, custom JSON)',
+        'Duplicate prevention & Spotify enrichment queue',
+        'In-memory Now Playing state with refresh endpoints',
+        'ListenBrainz bulk import UI + API'
       ],
       endpoints: {
         webhook: {
-          'POST /webhook/scrobble': 'Receive scrobble data from web-scrobbler',
+          'POST /webhook/scrobble': 'Receive scrobble data from clients (Web Scrobbler, ListenBrainz import payloads)',
           'POST /webhook': 'Alternative scrobble endpoint'
         },
-        api: {
-          'GET /api/stats': 'Get scrobbling statistics',
-          'GET /api/tracks': 'Get recent tracks (supports ?limit=50&offset=0)',
-          'GET /api/nowplaying': 'Get current now playing status',
-          'POST /api/nowplaying/playing': 'Set or refresh now playing status',
-          'GET /api/health': 'Health check endpoint',
-          'GET /api/duplicates': 'Get duplicate track statistics',
-          'DELETE /api/duplicates': 'Remove duplicate tracks (?dryRun=true for preview)'
+        nowPlaying: {
+          'GET /api/nowplaying': 'Get current in-memory Now Playing snapshot',
+          'POST /api/nowplaying/playing': 'Set or refresh Now Playing status (supports playing/paused/stopped)'
+        },
+        listeningData: {
+          'GET /api/tracks?limit=50&offset=0': 'List recent tracks',
+          'DELETE /api/tracks/range?start=<ISO>&end=<ISO>&dryRun=true': 'Delete tracks within a scrobbledAt date range (optional source/connector filters)',
+          'GET /api/stats': 'Aggregate listening statistics',
+          'GET /api/health': 'Health check endpoint'
+        },
+        import: {
+          'GET /import/listenbrainz': 'ListenBrainz import UI (paste JSON/JSON Lines or upload file)',
+          'POST /api/import/listenbrainz': 'Bulk import ListenBrainz JSON or JSON Lines payloads'
+        },
+        duplicates: {
+          'GET /api/duplicates': 'Duplicate track statistics',
+          'DELETE /api/duplicates?dryRun=true&details=true': 'Preview duplicate removal',
+          'DELETE /api/duplicates': 'Remove duplicate tracks'
         },
         spotify: {
-          'GET /api/spotify/status': 'Get Spotify integration status',
-          'GET /api/spotify/stats': 'Get Spotify enrichment statistics',
-          'POST /api/spotify/enrich': 'Manually enrich tracks with Spotify data (?limit=10&force=true)',
-          'POST /api/spotify/update-missing': 'Update missing Spotify data for existing tracks (?limit=50&missingOnly=true&priority=duration,album,year)',
+          'GET /api/spotify/status': 'Spotify integration status',
+          'GET /api/spotify/stats': 'Spotify enrichment statistics',
+          'POST /api/spotify/enrich?limit=10&force=true': 'Manual Spotify enrichment',
+          'POST /api/spotify/update-missing?limit=50&missingOnly=true': 'Fill missing metadata using Spotify',
           'DELETE /api/spotify/cache': 'Clear Spotify search cache'
         }
       },
-      duplicateManagement: {
-        checkDuplicates: 'GET /api/duplicates',
-        previewRemoval: 'DELETE /api/duplicates?dryRun=true&details=true',
-        removeDuplicates: 'DELETE /api/duplicates'
-      },
-      documentation: 'Send POST requests to /webhook/scrobble with track data. Duplicates are automatically handled.'
+      notes: [
+        'Use dryRun=true when deleting or deduplicating to preview the impact',
+        'ListenBrainz imports automatically queue Spotify enrichment when configured',
+        'Send POST requests to /webhook/scrobble with validated payloads to record new tracks'
+      ]
     };
 
     res.status(200).json(welcomeMessage);

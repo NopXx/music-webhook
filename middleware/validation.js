@@ -1,3 +1,95 @@
+const toDate = (value) => {
+  if (value === undefined || value === null) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const num = typeof value === 'string' ? Number(value) : value;
+  if (!Number.isFinite(num)) return null;
+  // Treat values larger than 1e12 as already in milliseconds
+  const millis = num > 1e12 ? num : num * 1000;
+  const date = new Date(millis);
+  return Number.isFinite(date.getTime()) ? date : null;
+};
+
+export const normalizeListenBrainzEntry = (payload = {}) => {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('ListenBrainz payload ต้องเป็น JSON object');
+  }
+
+  const metadata = payload.track_metadata || {};
+  const mapping = metadata.mbid_mapping || {};
+  const additionalInfo = metadata.additional_info || {};
+
+  let title = metadata.track_name || metadata.recording_name || mapping.recording_name || payload.title || '';
+  let artist = metadata.artist_name;
+
+  if (!artist && Array.isArray(mapping.artists)) {
+    artist = mapping.artists
+      .map((artistItem) => {
+        const name = artistItem?.artist_credit_name || '';
+        const joinPhrase = artistItem?.join_phrase || '';
+        return `${name}${joinPhrase}`;
+      })
+      .join('')
+      .trim() || null;
+  }
+
+  const album = metadata.release_name || '';
+
+  let duration = null;
+  if (typeof additionalInfo.duration_ms === 'number') {
+    duration = Math.round(additionalInfo.duration_ms / 1000);
+  } else if (typeof additionalInfo.duration === 'number') {
+    duration = Math.round(additionalInfo.duration);
+  }
+
+  const coverArtCandidates = [
+    additionalInfo.cover_art_url,
+    additionalInfo.coverart,
+    additionalInfo.album_art_url,
+    additionalInfo.album_coverart_url,
+    additionalInfo.track_art_url,
+    additionalInfo.image,
+    additionalInfo.image_url,
+  ].filter((value) => typeof value === 'string' && value.trim().length > 0);
+
+  let trackArtUrl = null;
+  if (coverArtCandidates.length > 0) {
+    trackArtUrl = coverArtCandidates[0];
+  } else {
+    const releaseForCover = mapping.caa_release_mbid || mapping.release_mbid;
+    if (releaseForCover) {
+      trackArtUrl = mapping.caa_id
+        ? `https://coverartarchive.org/release/${releaseForCover}/${mapping.caa_id}.jpg`
+        : `https://coverartarchive.org/release/${releaseForCover}/front`;
+    }
+  }
+
+  const listenedAt = toDate(payload.listened_at);
+  const insertedAt = toDate(payload.inserted_at);
+  const timestamp =
+    listenedAt ||
+    insertedAt ||
+    toDate(payload.timestamp) ||
+    toDate(payload.time) ||
+    null;
+
+  return {
+    title,
+    artist,
+    album,
+    duration,
+    connector: 'listenbrainz',
+    originalUrl: additionalInfo.listen_url || additionalInfo.track_url || additionalInfo.origin_url || '',
+    eventName: 'scrobble',
+    rawFormat: 'listenbrainz-import',
+    source: 'listenbrainz',
+    trackArtUrl: trackArtUrl || null,
+    timestamp,
+    listenedAt,
+    insertedAt,
+  };
+};
+
 // Validation middleware for webhook data
 
 export const validateTrackData = (req, res, next) => {
@@ -18,9 +110,46 @@ export const validateTrackData = (req, res, next) => {
 
   // Track data validation - support multiple formats
   let title, artist, album, duration, connector, originUrl;
+  let trackArtUrl = null;
+  let eventName = body.eventName || null;
+  let rawFormat = 'simple';
+  let timestamp = body.time || null;
+  let source = body.source || '';
+  let listenedAt = null;
+  let insertedAt = null;
 
-  // Format 1: Web-scrobbler new format (eventName + data.song)
-  if (body.eventName && body.data && body.data.song) {
+  // Format 1: ListenBrainz import format
+  if (body.track_metadata && (body.listened_at || body.inserted_at || body.track_metadata.track_name)) {
+    try {
+      const normalized = normalizeListenBrainzEntry(body);
+      ({
+        title,
+        artist,
+        album,
+        duration,
+        connector,
+        originalUrl: originUrl,
+        eventName,
+        rawFormat,
+        source,
+        trackArtUrl,
+        timestamp,
+        listenedAt,
+        insertedAt,
+      } = normalized);
+    } catch (error) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: error.message || 'ไม่สามารถอ่านข้อมูล ListenBrainz ได้'
+      });
+    }
+
+    if (process.env.DEBUG_VALIDATION === 'true') {
+      console.log('✅ Detected ListenBrainz import format');
+    }
+  }
+  // Format 2: Web-scrobbler new format (eventName + data.song)
+  else if (body.eventName && body.data && body.data.song) {
     const song = body.data.song;
     
     // Prefer processed first, then parsed, then noRegex
@@ -31,12 +160,14 @@ export const validateTrackData = (req, res, next) => {
     duration = trackData.duration;
     connector = song.connector ? (song.connector.label || song.connector.id) : '';
     originUrl = trackData.originUrl || '';
+    rawFormat = 'web-scrobbler-new';
+    source = 'web-scrobbler';
     
     if (process.env.DEBUG_VALIDATION === 'true') {
       console.log('✅ Detected Web-scrobbler new format');
     }
   }
-  // Format 2: Standard web-scrobbler format
+  // Format 3: Standard web-scrobbler format
   else if (body.track) {
     title = body.track.title || body.track.name;
     artist = body.track.artist;
@@ -44,12 +175,14 @@ export const validateTrackData = (req, res, next) => {
     duration = body.track.duration;
     connector = body.connector || body.source;
     originUrl = body.track.url || body.url || '';
+    rawFormat = 'web-scrobbler-standard';
+    source = body.source || 'web-scrobbler';
     
     if (process.env.DEBUG_VALIDATION === 'true') {
       console.log('✅ Detected standard web-scrobbler format');
     }
   }
-  // Format 3: Now playing format
+  // Format 4: Now playing format
   else if (body.nowPlaying) {
     title = body.nowPlaying.title || body.nowPlaying.track;
     artist = body.nowPlaying.artist;
@@ -57,12 +190,14 @@ export const validateTrackData = (req, res, next) => {
     duration = body.nowPlaying.duration;
     connector = body.source || 'web-scrobbler';
     originUrl = body.nowPlaying.url || '';
+    rawFormat = 'now-playing';
+    source = body.source || 'web-scrobbler';
     
     if (process.env.DEBUG_VALIDATION === 'true') {
       console.log('✅ Detected now playing format');
     }
   }
-  // Format 4: Simple format
+  // Format 5: Simple format
   else {
     title = body.title;
     artist = body.artist;
@@ -70,6 +205,8 @@ export const validateTrackData = (req, res, next) => {
     duration = body.duration;
     connector = body.connector || body.source;
     originUrl = body.url || '';
+    rawFormat = 'simple';
+    source = body.source || '';
     
     if (process.env.DEBUG_VALIDATION === 'true') {
       console.log('✅ Detected simple format');
@@ -85,10 +222,12 @@ export const validateTrackData = (req, res, next) => {
         title: title || null,
         artist: artist || null
       },
-      format: body.eventName ? 'web-scrobbler-new' : (body.track ? 'web-scrobbler-standard' : 'simple'),
+      format: rawFormat,
       debug: process.env.NODE_ENV === 'development' ? {
         bodyKeys: Object.keys(body),
-        detectedPath: body.eventName ? 'data.song.parsed/processed' : (body.track ? 'track.*' : 'root.*')
+        detectedPath: rawFormat === 'listenbrainz-import'
+          ? 'track_metadata.*'
+          : (body.eventName ? 'data.song.parsed/processed' : (body.track ? 'track.*' : 'root.*'))
       } : undefined
     });
   }
@@ -146,9 +285,13 @@ export const validateTrackData = (req, res, next) => {
     duration: duration || null,
     connector: connector || '',
     originalUrl: originUrl || '',
-    eventName: body.eventName || null,
-    timestamp: body.time || null,
-    rawFormat: body.eventName ? 'web-scrobbler-new' : (body.track ? 'web-scrobbler-standard' : 'simple')
+    eventName,
+    timestamp: timestamp || null,
+    rawFormat,
+    source,
+    listenedAt,
+    insertedAt,
+    trackArtUrl: trackArtUrl || null,
   };
 
   console.log('✅ Track data validation passed');
@@ -183,13 +326,13 @@ export const requestLogger = (req, res, next) => {
   const startTime = Date.now();
   
   // Log request
-  console.log(`📨 ${req.method} ${req.originalUrl} - ${req.ip} - ${new Date().toISOString()}`);
+  // console.log(`📨 ${req.method} ${req.originalUrl} - ${req.ip} - ${new Date().toISOString()}`);
   
   // Log response when finished
   res.on('finish', () => {
     const duration = Date.now() - startTime;
     const statusIcon = res.statusCode >= 400 ? '❌' : '✅';
-    console.log(`${statusIcon} ${req.method} ${req.originalUrl} - ${res.statusCode} - ${duration}ms`);
+    // console.log(`${statusIcon} ${req.method} ${req.originalUrl} - ${res.statusCode} - ${duration}ms`);
   });
 
   next();
