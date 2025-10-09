@@ -1609,6 +1609,10 @@ export class WebhookRoutes {
       const onlyMissingBasicData = req.query.missingOnly === 'true'; // เฉพาะที่ขาดข้อมูลพื้นฐาน
       const forceUpdate = req.query.force === 'true'; // บังคับ update ทั้งหมด
       const priorityFields = req.query.priority || 'duration,album,year'; // fields ที่ต้องการให้ priority
+      const priorityFieldsArray = priorityFields
+        .split(',')
+        .map(field => field.trim())
+        .filter(Boolean);
       
       console.log(`🔄 Starting Spotify data update for existing tracks...`);
       console.log(`   Limit: ${limit}`);
@@ -1624,26 +1628,55 @@ export class WebhookRoutes {
         query = { eventType: 'scrobble' };
       } else if (onlyMissingBasicData) {
         // เฉพาะ tracks ที่ขาดข้อมูลพื้นฐาน
-        const priorityFieldsArray = priorityFields.split(',');
-        const orConditions = [];
-        
+        const missingFieldConditions = [];
+
         if (priorityFieldsArray.includes('duration')) {
-          orConditions.push({ $or: [{ duration: null }, { duration: { $exists: false } }] });
+          missingFieldConditions.push({ duration: null }, { duration: { $exists: false } });
         }
         if (priorityFieldsArray.includes('album')) {
-          orConditions.push({ $or: [{ album: null }, { album: "" }, { album: { $exists: false } }] });
+          missingFieldConditions.push({ album: null }, { album: '' }, { album: { $exists: false } });
         }
         if (priorityFieldsArray.includes('year')) {
-          orConditions.push({ $or: [{ year: null }, { year: { $exists: false } }] });
+          missingFieldConditions.push({ year: null }, { year: { $exists: false } });
         }
-        
+        if (priorityFieldsArray.includes('trackNumber')) {
+          missingFieldConditions.push({ trackNumber: null }, { trackNumber: { $exists: false } });
+        }
+
+        if (missingFieldConditions.length === 0) {
+          missingFieldConditions.push(
+            { duration: null },
+            { duration: { $exists: false } },
+            { album: null },
+            { album: '' },
+            { album: { $exists: false } },
+            { year: null },
+            { year: { $exists: false } }
+          );
+        }
+
+        const searchRetryConditions = {
+          $or: [
+            { spotify_search_attempted: { $ne: true } },
+            { spotify_match_found: { $ne: true } },
+          ],
+        };
+
         query = {
           eventType: 'scrobble',
-          $and: [
-            { $or: orConditions },
-            { spotify_search_attempted: { $ne: true } } // ยังไม่เคยค้นหา Spotify
-          ]
         };
+
+        const andConditions = [];
+
+        if (missingFieldConditions.length > 0) {
+          andConditions.push({ $or: missingFieldConditions });
+        }
+
+        andConditions.push(searchRetryConditions);
+
+        if (andConditions.length > 0) {
+          query.$and = andConditions;
+        }
       } else {
         // Default: tracks ที่ยังไม่ได้ search Spotify
         query = {
