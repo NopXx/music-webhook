@@ -168,7 +168,7 @@ export const validateTrackData = (req, res, next) => {
     }
   }
   // Format 3: Standard web-scrobbler format
-  else if (body.track) {
+  else if (body.track && typeof body.track === 'object') {
     title = body.track.title || body.track.name;
     artist = body.track.artist;
     album = body.track.album;
@@ -199,7 +199,7 @@ export const validateTrackData = (req, res, next) => {
   }
   // Format 5: Simple format
   else {
-    title = body.title;
+    title = body.title || body.track;
     artist = body.artist;
     album = body.album;
     duration = body.duration;
