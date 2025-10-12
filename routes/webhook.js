@@ -5,7 +5,6 @@ import { normalizeListenBrainzEntry } from '../middleware/validation.js';
 
 export class WebhookRoutes {
   constructor() {
-    this.validateWebhookSecret = this.validateWebhookSecret.bind(this);
     this.handleScrobble = this.handleScrobble.bind(this);
     this.getStats = this.getStats.bind(this);
     this.getRecentTracks = this.getRecentTracks.bind(this);
@@ -21,26 +20,6 @@ export class WebhookRoutes {
     this.renderListenBrainzImportPage = this.renderListenBrainzImportPage.bind(this);
     this.importListenBrainz = this.importListenBrainz.bind(this);
     this.deleteTracksByDateRange = this.deleteTracksByDateRange.bind(this);
-  }
-
-  // Middleware to validate webhook secret
-  validateWebhookSecret(req, res, next) {
-    const secret = req.headers['x-webhook-secret'] || req.headers['authorization'];
-    const expectedSecret = process.env.WEBHOOK_SECRET;
-    
-    if (!expectedSecret) {
-      console.warn('⚠️ WEBHOOK_SECRET not set in environment variables');
-      return next(); // Allow if no secret is configured
-    }
-    
-    if (!secret || secret !== expectedSecret) {
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Invalid or missing webhook secret'
-      });
-    }
-    
-    next();
   }
 
   // Handle incoming scrobble data

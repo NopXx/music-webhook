@@ -1,32 +1,20 @@
 {
   "version": 2,
   "installCommand": "bun install",
-  "builds": [
-    {
-      "src": "index.js",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": [
-          "config/**",
-          "middleware/**",
-          "models/**",
-          "routes/**",
-          "services/**"
-        ]
-      }
-    }
-  ],
+  "buildCommand": "bun run build",
+  "devCommand": "bun run dev",
+  "outputDirectory": "public",
   "functions": {
-    "index.js": {
-      "runtime": "nodejs20.x",
+    "api/index.js": {
       "memory": 1024,
-      "maxDuration": 15
+      "maxDuration": 15,
+      "includeFiles": "{config,middleware,models,routes,services}/**"
     }
-},
+  },
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "index.js"
+      "dest": "api/index.js"
     }
   ]
 }

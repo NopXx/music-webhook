@@ -41,14 +41,13 @@ MONGODB_URI=mongodb://localhost:27017/music-scrobbler
 DB_NAME=music-scrobbler
 
 # API Configuration
-WEBHOOK_SECRET=webhook-secret-$(openssl rand -hex 16)
 API_KEY=api-key-$(openssl rand -hex 16)
 
 # Environment
 NODE_ENV=development
 EOF
 
-    echo "✅ .env file created with random secrets"
+    echo "✅ .env file created with random API key"
     echo "   Please review and update the configuration as needed"
 else
     echo "✅ .env file already exists"

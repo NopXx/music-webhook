@@ -34,7 +34,6 @@
    HOST=localhost
    MONGODB_URI=mongodb://localhost:27017/music-scrobbler
 
-   WEBHOOK_SECRET=your-webhook-secret
    API_KEY=optional-api-key
 
    NODE_ENV=development
@@ -59,7 +58,6 @@
 ## แหล่งข้อมูลที่รองรับ
 ### 1. Web Scrobbler (บราวเซอร์ส่วนเสริม)
 - ตั้งค่า URL ที่ `http://<host>:<port>/webhook/scrobble`
-- เพิ่ม header `X-Webhook-Secret: <WEBHOOK_SECRET>` ถ้ามีตั้งค่า
 - ระบบรองรับทั้งรูปแบบเก่า (`track.title`, `track.artist`) และรูปแบบใหม่ (`eventName`, `data.song.processed`)
 
 ### 2. ListenBrainz Import Format
@@ -140,10 +138,9 @@
    docker build -t music-webhook .
    ```
 2. หรือใช้ `docker-compose up -d` เพื่อรันพร้อม MongoDB/บริการอื่นๆ (ปรับไฟล์ `docker-compose.yml` ตามต้องการ)
-3. ตรวจสอบ environment variables ใน container ให้ครบ โดยเฉพาะ `MONGODB_URI` และ `WEBHOOK_SECRET`
+3. ตรวจสอบ environment variables ใน container ให้ครบ โดยเฉพาะ `MONGODB_URI`
 
 ## ทิปและแนวทางปฏิบัติ
-- แนะนำให้ตั้ง `WEBHOOK_SECRET` เพื่อป้องกันการยิงข้อมูลมั่ว
 - หากใช้ Spotify ให้เปิด `SPOTIFY_FETCH_AUDIO_FEATURES=true` เฉพาะตอนต้องการข้อมูลเชิงลึก เพราะใช้ quota เพิ่ม
 - สร้าง index ใน MongoDB ตามที่ schema กำหนดแล้ว เพื่อให้ query ทำงานเร็วขึ้น
 - สามารถเพิ่มระบบ auth/API key เพิ่มเติมได้ที่ middleware `validateApiKey`

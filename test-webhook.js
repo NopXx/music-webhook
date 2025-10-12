@@ -2,7 +2,6 @@
 // วิธีใช้: bun run test
 
 const BASE_URL = 'http://localhost:3000';
-const WEBHOOK_SECRET = 'your-webhook-secret-key-here'; // ตั้งให้ตรงกับ .env
 const API_KEY = 'your-api-key-here'; // ถ้ามี
 
 console.log('🧪 Testing Music Webhook Server (Express.js)...\n');
@@ -104,47 +103,26 @@ async function runValidationTests() {
   console.log('🔍 Running validation tests...\n');
 
   // Test 1: Valid standard format
-  await testEndpoint('POST', '/webhook/scrobble', testDataSets.standard, {
-    'X-Webhook-Secret': WEBHOOK_SECRET
-  });
+  await testEndpoint('POST', '/webhook/scrobble', testDataSets.standard);
 
   // Test 2: Valid simple format
-  await testEndpoint('POST', '/webhook/scrobble', testDataSets.simple, {
-    'X-Webhook-Secret': WEBHOOK_SECRET
-  });
+  await testEndpoint('POST', '/webhook/scrobble', testDataSets.simple);
 
   // Test 3: Valid nowPlaying format
-  await testEndpoint('POST', '/webhook/scrobble', testDataSets.nowPlaying, {
-    'X-Webhook-Secret': WEBHOOK_SECRET
-  });
+  await testEndpoint('POST', '/webhook/scrobble', testDataSets.nowPlaying);
 
   // Test 4: Invalid data (should fail validation)
-  await testEndpoint('POST', '/webhook/scrobble', testDataSets.invalid, {
-    'X-Webhook-Secret': WEBHOOK_SECRET
-  });
+  await testEndpoint('POST', '/webhook/scrobble', testDataSets.invalid);
 
   // Test 5: Empty required fields (should fail validation)
-  await testEndpoint('POST', '/webhook/scrobble', testDataSets.emptyFields, {
-    'X-Webhook-Secret': WEBHOOK_SECRET
-  });
+  await testEndpoint('POST', '/webhook/scrobble', testDataSets.emptyFields);
 
   // Test 6: Fields too long (should fail validation)
-  await testEndpoint('POST', '/webhook/scrobble', testDataSets.longFields, {
-    'X-Webhook-Secret': WEBHOOK_SECRET
-  });
+  await testEndpoint('POST', '/webhook/scrobble', testDataSets.longFields);
 
   // Test 7: Wrong content type
   await testEndpoint('POST', '/webhook/scrobble', testDataSets.simple, {
-    'Content-Type': 'text/plain',
-    'X-Webhook-Secret': WEBHOOK_SECRET
-  });
-
-  // Test 8: Missing webhook secret (should fail if secret is required)
-  await testEndpoint('POST', '/webhook/scrobble', testDataSets.simple);
-
-  // Test 9: Wrong webhook secret
-  await testEndpoint('POST', '/webhook/scrobble', testDataSets.simple, {
-    'X-Webhook-Secret': 'wrong-secret'
+    'Content-Type': 'text/plain'
   });
 }
 
@@ -179,8 +157,6 @@ async function runRateLimitTests() {
       testEndpoint('POST', '/webhook/scrobble', {
         ...testDataSets.simple,
         title: `Rate Limit Test ${i + 1}`
-      }, {
-        'X-Webhook-Secret': WEBHOOK_SECRET
       })
     );
   }
@@ -200,8 +176,6 @@ async function runPerformanceTests() {
       testEndpoint('POST', '/webhook/scrobble', {
         ...testDataSets.simple,
         title: `Performance Test ${i + 1}`
-      }, {
-        'X-Webhook-Secret': WEBHOOK_SECRET
       })
     );
   }

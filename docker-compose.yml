@@ -11,7 +11,6 @@ services:
       - PORT=3000
       - HOST=0.0.0.0
       - MONGODB_URI=mongodb://mongodb:27017/music-scrobbler
-      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-default-webhook-secret}
       - API_KEY=${API_KEY:-default-api-key}
       - NODE_ENV=production
     depends_on:

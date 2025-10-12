@@ -62,8 +62,7 @@ async function testSpotifyEnrichment() {
       const response = await fetch(`${BASE_URL}/webhook/scrobble`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Secret': process.env.WEBHOOK_SECRET || 'test123'
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           title: track.title,

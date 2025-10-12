@@ -2,10 +2,12 @@
   "name": "music-webhook",
   "version": "1.0.0",
   "description": "Webhook server for receiving web-scrobbler data and storing to MongoDB",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "dev": "bun run --hot index.js",
     "start": "bun run index.js",
+    "build": "mkdir -p public && node scripts/generate-placeholder.js",
     "test": "bun run test-webhook.js",
     "test:spotify": "bun run test-spotify.js",
     "test:enrichment": "bun run test-enrichment.js",
@@ -27,6 +29,9 @@
   "keywords": ["webhook", "music", "scrobbler", "mongodb", "bun"],
   "author": "nopxx",
   "license": "MIT",
+  "engines": {
+    "node": ">=18.17"
+  },
   "dependencies": {
     "express": "^4.18.2",
     "mongoose": "^8.0.0",

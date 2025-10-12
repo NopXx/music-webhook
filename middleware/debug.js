@@ -22,56 +22,6 @@ export const debugMiddleware = (req, res, next) => {
   next();
 };
 
-// Webhook secret validation with better debugging
-export const debugWebhookSecret = (req, res, next) => {
-  const secret = req.headers['x-webhook-secret'] || 
-                req.headers['authorization'] || 
-                req.headers['webhook-secret'] ||
-                req.query.secret;
-                
-  const expectedSecret = process.env.WEBHOOK_SECRET;
-  
-  console.log('🔐 Webhook Secret Debug:');
-  console.log('   Expected secret:', expectedSecret);
-  console.log('   Received in X-Webhook-Secret:', req.headers['x-webhook-secret']);
-  console.log('   Received in Authorization:', req.headers['authorization']);
-  console.log('   Received in Webhook-Secret:', req.headers['webhook-secret']);
-  console.log('   Received in query param:', req.query.secret);
-  console.log('   Final secret used:', secret);
-  console.log('');
-  
-  if (!expectedSecret) {
-    console.warn('⚠️ WEBHOOK_SECRET not set - allowing all requests');
-    return next();
-  }
-  
-  if (!secret || secret !== expectedSecret) {
-    console.log('❌ Secret validation failed');
-    return res.status(401).json({ 
-      error: 'Unauthorized',
-      message: 'Invalid or missing webhook secret',
-      debug: process.env.NODE_ENV === 'development' ? {
-        expectedSecret,
-        receivedSecret: secret,
-        availableHeaders: Object.keys(req.headers),
-        note: 'In development, you can bypass this by setting WEBHOOK_SECRET to empty string'
-      } : undefined
-    });
-  }
-  
-  console.log('✅ Secret validation passed');
-  next();
-};
-
-// Temporary bypass for development
-export const bypassSecretInDev = (req, res, next) => {
-  if (process.env.NODE_ENV === 'development' && process.env.BYPASS_WEBHOOK_SECRET === 'true') {
-    console.log('🚫 Bypassing webhook secret validation in development mode');
-    return next();
-  }
-  return debugWebhookSecret(req, res, next);
-};
-
 // Webhook-specific debug middleware
 export const debugWebhookData = (req, res, next) => {
   if (process.env.NODE_ENV === 'development' && process.env.DEBUG_WEBHOOKS === 'true' && req.originalUrl.includes('/webhook')) {
@@ -123,7 +73,5 @@ export const debugWebhookData = (req, res, next) => {
 
 export default {
   debugMiddleware,
-  debugWebhookSecret,
-  bypassSecretInDev,
   debugWebhookData
 };

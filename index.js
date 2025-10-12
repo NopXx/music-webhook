@@ -4,6 +4,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { fileURLToPath } from 'url';
 import Database from './config/database.js';
 import webhookRoutes from './routes/webhook.js';
 import { 
@@ -15,8 +16,7 @@ import {
   rateLimitInfo
 } from './middleware/validation.js';
 import { 
-  debugMiddleware, 
-  bypassSecretInDev,
+  debugMiddleware,
   debugWebhookData
 } from './middleware/debug.js';
 
@@ -45,7 +45,7 @@ class MusicWebhookServer {
     this.app.use(cors({
       origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Webhook-Secret'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
       credentials: true
     }));
 
@@ -102,18 +102,16 @@ class MusicWebhookServer {
     this.app.get('/health', webhookRoutes.healthCheck);
     this.app.get('/api/health', webhookRoutes.healthCheck);
 
-    // Webhook endpoints (with validation and secret validation)
+    // Webhook endpoints (with validation)
     this.app.post('/webhook/scrobble', 
       validateContentType,
       debugWebhookData,
-      bypassSecretInDev,
       validateTrackData,
       asyncHandler(webhookRoutes.handleScrobble)
     );
     this.app.post('/webhook', 
       validateContentType,
       debugWebhookData,
-      bypassSecretInDev,
       validateTrackData,
       asyncHandler(webhookRoutes.handleScrobble)
     );
@@ -279,25 +277,30 @@ const gracefulShutdown = async (signal, server) => {
   }
 };
 
-// Start the server
 const musicServer = new MusicWebhookServer();
-musicServer.start().then((server) => {
-  // Setup graceful shutdown handlers
-  process.on('SIGTERM', () => gracefulShutdown('SIGTERM', server));
-  process.on('SIGINT', () => gracefulShutdown('SIGINT', server));
-  
-  // Handle uncaught exceptions
-  process.on('uncaughtException', (error) => {
-    console.error('❌ Uncaught exception:', error);
-    gracefulShutdown('UNCAUGHT_EXCEPTION', server);
-  });
 
-  process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ Unhandled rejection at:', promise, 'reason:', reason);
-    gracefulShutdown('UNHANDLED_REJECTION', server);
-  });
+export const app = musicServer.app;
+export default app;
 
-}).catch((error) => {
-  console.error('❌ Failed to start server:', error);
-  process.exit(1);
-});
+const modulePath = fileURLToPath(import.meta.url);
+const executedFile = process.argv[1];
+
+if (executedFile === modulePath) {
+  musicServer.start().then((server) => {
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM', server));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT', server));
+
+    process.on('uncaughtException', (error) => {
+      console.error('❌ Uncaught exception:', error);
+      gracefulShutdown('UNCAUGHT_EXCEPTION', server);
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+      console.error('❌ Unhandled rejection at:', promise, 'reason:', reason);
+      gracefulShutdown('UNHANDLED_REJECTION', server);
+    });
+  }).catch((error) => {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  });
+}

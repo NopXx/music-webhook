@@ -3,7 +3,7 @@
 
 const BASE_URL = 'http://localhost:3000';
 
-console.log('🧪 Quick Test - Webhook 401 Fix...\n');
+console.log('🧪 Quick Test - Webhook Endpoint...\n');
 
 // Test data
 const testData = {
@@ -16,7 +16,7 @@ const testData = {
 
 async function testWebhook() {
   try {
-    console.log('📡 Testing webhook without secret (should work with BYPASS_WEBHOOK_SECRET=true)...');
+    console.log('📡 Sending webhook payload...');
     
     const response = await fetch(`${BASE_URL}/webhook/scrobble`, {
       method: 'POST',
@@ -31,45 +31,14 @@ async function testWebhook() {
     console.log(`   Status: ${response.status}`);
     console.log(`   Response:`, responseData);
     
-    if (response.status === 200) {
-      console.log('✅ Success! Webhook is working without secret');
-    } else if (response.status === 401) {
-      console.log('❌ Still getting 401. Check the following:');
-      console.log('   1. Server restarted after .env changes?');
-      console.log('   2. BYPASS_WEBHOOK_SECRET=true in .env?');
-      console.log('   3. NODE_ENV=development in .env?');
+    if (response.ok) {
+      console.log('✅ Success! Webhook accepted the payload');
     } else {
-      console.log('⚠️ Different error occurred');
+      console.log('⚠️ Webhook responded with an error status');
     }
     
   } catch (error) {
     console.error('❌ Test failed:', error.message);
-  }
-}
-
-async function testWebhookWithSecret() {
-  try {
-    console.log('\n📡 Testing webhook with secret...');
-    
-    const response = await fetch(`${BASE_URL}/webhook/scrobble`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Webhook-Secret': 'test123'
-      },
-      body: JSON.stringify({
-        ...testData,
-        title: 'Test Song With Secret'
-      })
-    });
-
-    const responseData = await response.json();
-    
-    console.log(`   Status: ${response.status}`);
-    console.log(`   Response:`, responseData);
-    
-  } catch (error) {
-    console.error('❌ Test with secret failed:', error.message);
   }
 }
 
@@ -88,13 +57,11 @@ async function main() {
   }
 
   await testWebhook();
-  await testWebhookWithSecret();
   
-  console.log('\n📋 Next steps if still getting 401:');
+  console.log('\n📋 Next steps if requests fail:');
   console.log('   1. Restart the server: Ctrl+C, then bun run dev');
-  console.log('   2. Check .env file has BYPASS_WEBHOOK_SECRET=true');
-  console.log('   3. Check web-scrobbler settings');
-  console.log('   4. Look at server logs for debug info');
+  console.log('   2. Double-check request payload structure');
+  console.log('   3. Verify MongoDB connection and server logs for details');
 }
 
 main().catch(console.error);

@@ -30,8 +30,7 @@ async function testRaceConditionFix() {
         fetch(`${BASE_URL}/webhook/scrobble`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'X-Webhook-Secret': process.env.WEBHOOK_SECRET || 'test123'
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
             ...testTrack,
@@ -90,8 +89,7 @@ async function testSpotifyEnrichmentRobustness() {
       const response = await fetch(`${BASE_URL}/webhook/scrobble`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Secret': process.env.WEBHOOK_SECRET || 'test123'
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           title: track.title,

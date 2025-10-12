@@ -7,6 +7,15 @@ class Database {
 
   async connect() {
     try {
+      if (this.connection && mongoose.connection.readyState === 1) {
+        return this.connection;
+      }
+
+      if (mongoose.connection.readyState === 1) {
+        this.connection = mongoose.connection;
+        return this.connection;
+      }
+
       const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/music-scrobbler';
       
       const options = {
@@ -36,6 +45,9 @@ class Database {
 
     } catch (error) {
       console.error('❌ Failed to connect to MongoDB:', error.message);
+      if (process.env.VERCEL === '1') {
+        throw error;
+      }
       process.exit(1);
     }
   }
