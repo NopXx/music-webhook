@@ -196,6 +196,95 @@ export class WebhookRoutes {
 
     const userAgent = context.userAgent || '';
     const ipAddress = context.ipAddress || 'unknown';
+    const coerceNumber = (value) => {
+      if (value === undefined || value === null) return null;
+      const num = Number(value);
+      return Number.isFinite(num) ? num : null;
+    };
+    const parseStartTimestamp = (value) => {
+      if (value === undefined || value === null) return null;
+      if (value instanceof Date) {
+        return Number.isFinite(value.getTime()) ? value : null;
+      }
+      if (typeof value === 'string' && value.trim().length === 0) {
+        return null;
+      }
+      const numeric = coerceNumber(value);
+      if (numeric !== null) {
+        const millis = numeric > 1e12 ? numeric : numeric * 1000;
+        const date = new Date(millis);
+        return Number.isFinite(date.getTime()) ? date : null;
+      }
+      const parsed = new Date(value);
+      return Number.isFinite(parsed.getTime()) ? parsed : null;
+    };
+    const mergeMetadata = (target = {}, source = {}) => {
+      if (!source || typeof source !== 'object') return target;
+      const next = { ...target };
+      const setString = (key, value) => {
+        if (typeof value === 'string' && value.trim().length > 0) {
+          next[key] = value.trim();
+        }
+      };
+      setString('trackArtUrl', source.trackArtUrl);
+      setString('artistUrl', source.artistUrl);
+      setString('trackUrl', source.trackUrl);
+      setString('albumUrl', source.albumUrl);
+      setString('metadataLabel', source.label ?? source.metadataLabel);
+      setString('animationUrl', source.animationUrl);
+      setString('primaryMediaUrl', source.primaryMediaUrl);
+      setString('primaryMediaType', source.primaryMediaType);
+
+      const userPlayCount = coerceNumber(source.userPlayCount);
+      if (userPlayCount !== null) {
+        next.userPlayCount = userPlayCount;
+      }
+
+      if (typeof source.userloved === 'boolean') {
+        next.isLovedInService = source.userloved;
+      }
+      if (typeof source.isLovedInService === 'boolean') {
+        next.isLovedInService = source.isLovedInService;
+      }
+      if (typeof source.isLoved === 'boolean') {
+        next.isLovedInService = source.isLoved;
+      }
+
+      const start = parseStartTimestamp(source.startTimestamp);
+      if (start) {
+        next.startTimestamp = start;
+      }
+
+      const current = coerceNumber(source.currentTime);
+      if (current !== null) {
+        next.currentTime = current;
+      }
+
+      return next;
+    };
+
+    let metadata = {
+      userPlayCount: coerceNumber(validatedTrack.userPlayCount),
+      trackArtUrl: validatedTrack.trackArtUrl || null,
+      artistUrl: validatedTrack.artistUrl || null,
+      trackUrl: validatedTrack.trackUrl || null,
+      albumUrl: validatedTrack.albumUrl || null,
+      metadataLabel: validatedTrack.metadataLabel || null,
+      animationUrl: validatedTrack.animationUrl || null,
+      primaryMediaUrl: validatedTrack.primaryMediaUrl || null,
+      primaryMediaType: validatedTrack.primaryMediaType || null,
+      isLovedInService: typeof validatedTrack.isLovedInService === 'boolean'
+        ? validatedTrack.isLovedInService
+        : null,
+      startTimestamp: parseStartTimestamp(validatedTrack.startTimestamp),
+      currentTime: coerceNumber(validatedTrack.currentTime),
+    };
+    let flags = {};
+
+    metadata = mergeMetadata(metadata, body?.metadata);
+    if (body?.data && typeof body.data === 'object') {
+      metadata = mergeMetadata(metadata, body.data.metadata);
+    }
 
     if ((validatedTrack.rawFormat || '').toLowerCase() === 'listenbrainz-import') {
       const trackMetadata = body.track_metadata || {};
@@ -263,23 +352,10 @@ export class WebhookRoutes {
       return trackData;
     }
 
-    let metadata = {};
-    let flags = {};
-
     if (body.eventName && body.data && body.data.song) {
       const song = body.data.song;
 
-      if (song.metadata) {
-        metadata = {
-          userPlayCount: song.metadata.userPlayCount || null,
-          trackArtUrl: song.metadata.trackArtUrl || null,
-          artistUrl: song.metadata.artistUrl || null,
-          trackUrl: song.metadata.trackUrl || null,
-          albumUrl: song.metadata.albumUrl || null,
-          isLovedInService: song.metadata.userloved || false,
-          startTimestamp: song.metadata.startTimestamp ? new Date(song.metadata.startTimestamp * 1000) : null,
-        };
-      }
+      metadata = mergeMetadata(metadata, song.metadata);
 
       if (song.flags) {
         flags = {
@@ -290,7 +366,7 @@ export class WebhookRoutes {
       }
 
       const trackData = song.parsed || song.processed || {};
-      metadata.currentTime = trackData.currentTime || null;
+      metadata = mergeMetadata(metadata, { currentTime: trackData.currentTime });
     }
 
     return {

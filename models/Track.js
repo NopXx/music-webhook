@@ -104,6 +104,20 @@ const trackSchema = new mongoose.Schema({
   albumUrl: {
     type: String, // URL ของ album บน Last.fm
   },
+  metadataLabel: {
+    type: String, // Label จาก metadata (เช่น Apple Music Scrobbler)
+    trim: true,
+  },
+  animationUrl: {
+    type: String, // Animation หรือ video ที่แนบมากับ metadata
+  },
+  primaryMediaUrl: {
+    type: String, // Primary media URL จาก metadata
+  },
+  primaryMediaType: {
+    type: String, // ประเภทของ primary media (เช่น video)
+    trim: true,
+  },
   isLovedInService: {
     type: Boolean, // loved ใน service ต้นทาง (Last.fm)
   },
@@ -397,6 +411,10 @@ trackSchema.statics.findOrCreateTrack = async function(trackData) {
     artistUrl: metadata?.artistUrl ?? trackData?.artistUrl ?? undefined,
     trackUrl: metadata?.trackUrl ?? trackData?.trackUrl ?? undefined,
     albumUrl: metadata?.albumUrl ?? trackData?.albumUrl ?? undefined,
+    metadataLabel: metadata?.label ?? trackData?.metadataLabel ?? undefined,
+    animationUrl: metadata?.animationUrl ?? trackData?.animationUrl ?? undefined,
+    primaryMediaUrl: metadata?.primaryMediaUrl ?? trackData?.primaryMediaUrl ?? undefined,
+    primaryMediaType: metadata?.primaryMediaType ?? trackData?.primaryMediaType ?? undefined,
     userPlayCount: metadata?.userPlayCount ?? trackData?.userPlayCount ?? undefined,
     isLovedInService: metadata?.userloved ?? trackData?.isLovedInService ?? undefined,
 

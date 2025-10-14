@@ -111,12 +111,97 @@ export const validateTrackData = (req, res, next) => {
   // Track data validation - support multiple formats
   let title, artist, album, duration, connector, originUrl;
   let trackArtUrl = null;
+  let artistUrl = null;
+  let trackUrl = null;
+  let albumUrl = null;
+  let metadataLabel = null;
+  let animationUrl = null;
+  let primaryMediaUrl = null;
+  let primaryMediaType = null;
+  let userPlayCount = null;
+  let isLovedInService = null;
+  let startTimestamp = null;
+  let currentTime = null;
   let eventName = body.eventName || null;
   let rawFormat = 'simple';
   let timestamp = body.time || null;
   let source = body.source || '';
   let listenedAt = null;
   let insertedAt = null;
+
+  const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
+  const coerceNumber = (value) => {
+    if (value === undefined || value === null) return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+  const normalizeStartTimestamp = (value) => {
+    if (value === undefined || value === null) return null;
+    if (value instanceof Date) {
+      return Number.isFinite(value.getTime()) ? value : null;
+    }
+    if (typeof value === 'string' && value.trim().length === 0) {
+      return null;
+    }
+    const numeric = coerceNumber(value);
+    if (numeric !== null) {
+      const millis = numeric > 1e12 ? numeric : numeric * 1000;
+      const date = new Date(millis);
+      return Number.isFinite(date.getTime()) ? date : null;
+    }
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  };
+  const applyMetadata = (metadataSource) => {
+    if (!metadataSource || typeof metadataSource !== 'object') return;
+
+    if (isNonEmptyString(metadataSource.trackArtUrl)) {
+      trackArtUrl = metadataSource.trackArtUrl.trim();
+    }
+    if (isNonEmptyString(metadataSource.artistUrl)) {
+      artistUrl = metadataSource.artistUrl.trim();
+    }
+    if (isNonEmptyString(metadataSource.trackUrl)) {
+      trackUrl = metadataSource.trackUrl.trim();
+    }
+    if (isNonEmptyString(metadataSource.albumUrl)) {
+      albumUrl = metadataSource.albumUrl.trim();
+    }
+    if (isNonEmptyString(metadataSource.label)) {
+      metadataLabel = metadataSource.label.trim();
+    }
+    if (isNonEmptyString(metadataSource.animationUrl)) {
+      animationUrl = metadataSource.animationUrl.trim();
+    }
+    if (isNonEmptyString(metadataSource.primaryMediaUrl)) {
+      primaryMediaUrl = metadataSource.primaryMediaUrl.trim();
+    }
+    if (isNonEmptyString(metadataSource.primaryMediaType)) {
+      primaryMediaType = metadataSource.primaryMediaType.trim();
+    }
+    const count = coerceNumber(metadataSource.userPlayCount);
+    if (count !== null) {
+      userPlayCount = count;
+    }
+    if (typeof metadataSource.userloved === 'boolean') {
+      isLovedInService = metadataSource.userloved;
+    } else if (typeof metadataSource.isLoved === 'boolean') {
+      isLovedInService = metadataSource.isLoved;
+    }
+    const metaStart = normalizeStartTimestamp(metadataSource.startTimestamp);
+    if (metaStart) {
+      startTimestamp = metaStart;
+    }
+    const metaCurrentTime = coerceNumber(metadataSource.currentTime);
+    if (metaCurrentTime !== null) {
+      currentTime = metaCurrentTime;
+    }
+  };
+
+  applyMetadata(body.metadata);
+  if (body.data && typeof body.data === 'object') {
+    applyMetadata(body.data.metadata);
+  }
 
   // Format 1: ListenBrainz import format
   if (body.track_metadata && (body.listened_at || body.inserted_at || body.track_metadata.track_name)) {
@@ -154,6 +239,11 @@ export const validateTrackData = (req, res, next) => {
     
     // Prefer processed first, then parsed, then noRegex
     const trackData = song.processed || song.parsed || song.noRegex || {};
+    applyMetadata(song.metadata);
+    const ct = coerceNumber(trackData.currentTime);
+    if (ct !== null) {
+      currentTime = ct;
+    }
     title = trackData.track;
     artist = trackData.artist;
     album = trackData.album;
@@ -173,6 +263,7 @@ export const validateTrackData = (req, res, next) => {
     artist = body.track.artist;
     album = body.track.album;
     duration = body.track.duration;
+    applyMetadata(body.track.metadata);
     connector = body.connector || body.source;
     originUrl = body.track.url || body.url || '';
     rawFormat = 'web-scrobbler-standard';
@@ -188,6 +279,7 @@ export const validateTrackData = (req, res, next) => {
     artist = body.nowPlaying.artist;
     album = body.nowPlaying.album;
     duration = body.nowPlaying.duration;
+    applyMetadata(body.nowPlaying.metadata);
     connector = body.source || 'web-scrobbler';
     originUrl = body.nowPlaying.url || '';
     rawFormat = 'now-playing';
@@ -210,6 +302,20 @@ export const validateTrackData = (req, res, next) => {
     
     if (process.env.DEBUG_VALIDATION === 'true') {
       console.log('✅ Detected simple format');
+    }
+  }
+
+  if (currentTime === null && body.track && typeof body.track === 'object') {
+    const trackCurrent = coerceNumber(body.track.currentTime);
+    if (trackCurrent !== null) {
+      currentTime = trackCurrent;
+    }
+  }
+
+  if (currentTime === null) {
+    const rootCurrent = coerceNumber(body.currentTime);
+    if (rootCurrent !== null) {
+      currentTime = rootCurrent;
     }
   }
 
@@ -292,6 +398,17 @@ export const validateTrackData = (req, res, next) => {
     listenedAt,
     insertedAt,
     trackArtUrl: trackArtUrl || null,
+    artistUrl: artistUrl || null,
+    trackUrl: trackUrl || null,
+    albumUrl: albumUrl || null,
+    userPlayCount: userPlayCount !== null ? userPlayCount : null,
+    isLovedInService: typeof isLovedInService === 'boolean' ? isLovedInService : null,
+    startTimestamp: startTimestamp || null,
+    currentTime: currentTime !== null ? currentTime : null,
+    metadataLabel: metadataLabel || null,
+    animationUrl: animationUrl || null,
+    primaryMediaUrl: primaryMediaUrl || null,
+    primaryMediaType: primaryMediaType || null,
   };
 
   console.log('✅ Track data validation passed');
