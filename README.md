@@ -112,13 +112,6 @@
 | GET    | `/api/duplicates` | สำรวจข้อมูลซ้ำ |
 | DELETE | `/api/duplicates?dryRun=true` | ลบหรือพรีวิวข้อมูลซ้ำ |
 
-## การทดสอบ
-มีสคริปต์ตัวอย่างให้รันด้วย Bun:
-- `bun run test-new-format.js` — ทดสอบ webhook รูปแบบใหม่ของ Web Scrobbler
-- `bun run test-webhook.js` — ยิง webhook mock หลายแบบ
-- `bun run test-spotify.js` — ตรวจสอบ Spotify enrichment
-- `bun run test-update-missing.js` — จำลองการเติมข้อมูลที่ขาด
-
 > หมายเหตุ: สคริปต์เหล่านี้จำเป็นต้องมีเซิร์ฟเวอร์และ MongoDB ที่พร้อมใช้งานก่อน
 
 ## สถาปัตยกรรมและ Middleware
