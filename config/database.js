@@ -17,6 +17,7 @@ class Database {
       }
 
       const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/music-scrobbler';
+      const dbName = process.env.DB_NAME;
       
       const options = {
         useNewUrlParser: true,
@@ -25,9 +26,14 @@ class Database {
         socketTimeoutMS: 45000,
       };
 
+      if (dbName) {
+        options.dbName = dbName;
+      }
+
       this.connection = await mongoose.connect(mongoUri, options);
       
-      console.log(`✅ MongoDB connected successfully to: ${mongoUri}`);
+      const dbLabel = dbName ? `${mongoUri} (db: ${dbName})` : mongoUri;
+      console.log(`✅ MongoDB connected successfully to: ${dbLabel}`);
       
       // Handle connection events
       mongoose.connection.on('error', (err) => {
