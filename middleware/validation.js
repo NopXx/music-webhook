@@ -116,6 +116,7 @@ export const validateTrackData = (req, res, next) => {
   let albumUrl = null;
   let metadataLabel = null;
   let animationUrl = null;
+  let masterTallUrl = null;
   let primaryMediaUrl = null;
   let primaryMediaType = null;
   let userPlayCount = null;
@@ -172,6 +173,9 @@ export const validateTrackData = (req, res, next) => {
     }
     if (isNonEmptyString(metadataSource.animationUrl)) {
       animationUrl = metadataSource.animationUrl.trim();
+    }
+    if (isNonEmptyString(metadataSource.masterTallUrl)) {
+      masterTallUrl = metadataSource.masterTallUrl.trim();
     }
     if (isNonEmptyString(metadataSource.primaryMediaUrl)) {
       primaryMediaUrl = metadataSource.primaryMediaUrl.trim();
@@ -407,6 +411,7 @@ export const validateTrackData = (req, res, next) => {
     currentTime: currentTime !== null ? currentTime : null,
     metadataLabel: metadataLabel || null,
     animationUrl: animationUrl || null,
+    masterTallUrl: masterTallUrl || null,
     primaryMediaUrl: primaryMediaUrl || null,
     primaryMediaType: primaryMediaType || null,
   };

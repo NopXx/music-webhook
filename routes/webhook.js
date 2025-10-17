@@ -232,6 +232,7 @@ export class WebhookRoutes {
       setString('albumUrl', source.albumUrl);
       setString('metadataLabel', source.label ?? source.metadataLabel);
       setString('animationUrl', source.animationUrl);
+      setString('masterTallUrl', source.masterTallUrl);
       setString('primaryMediaUrl', source.primaryMediaUrl);
       setString('primaryMediaType', source.primaryMediaType);
 
@@ -271,6 +272,7 @@ export class WebhookRoutes {
       albumUrl: validatedTrack.albumUrl || null,
       metadataLabel: validatedTrack.metadataLabel || null,
       animationUrl: validatedTrack.animationUrl || null,
+      masterTallUrl: validatedTrack.masterTallUrl || null,
       primaryMediaUrl: validatedTrack.primaryMediaUrl || null,
       primaryMediaType: validatedTrack.primaryMediaType || null,
       isLovedInService: typeof validatedTrack.isLovedInService === 'boolean'

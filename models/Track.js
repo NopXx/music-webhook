@@ -111,6 +111,9 @@ const trackSchema = new mongoose.Schema({
   animationUrl: {
     type: String, // Animation หรือ video ที่แนบมากับ metadata
   },
+  masterTallUrl: {
+    type: String, // Animation Tall หรือ video ที่แนบมากับ metadata
+  },
   primaryMediaUrl: {
     type: String, // Primary media URL จาก metadata
   },
@@ -413,6 +416,7 @@ trackSchema.statics.findOrCreateTrack = async function(trackData) {
     albumUrl: metadata?.albumUrl ?? trackData?.albumUrl ?? undefined,
     metadataLabel: metadata?.label ?? trackData?.metadataLabel ?? undefined,
     animationUrl: metadata?.animationUrl ?? trackData?.animationUrl ?? undefined,
+    masterTallUrl: metadata?.masterTallUrl ?? trackData?.masterTallUrl ?? undefined,
     primaryMediaUrl: metadata?.primaryMediaUrl ?? trackData?.primaryMediaUrl ?? undefined,
     primaryMediaType: metadata?.primaryMediaType ?? trackData?.primaryMediaType ?? undefined,
     userPlayCount: metadata?.userPlayCount ?? trackData?.userPlayCount ?? undefined,

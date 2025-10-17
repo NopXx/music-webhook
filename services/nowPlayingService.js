@@ -19,6 +19,7 @@ class NowPlayingService {
       trackUrl: trackData.trackUrl || trackData?.song?.metadata?.trackUrl || null,
       albumUrl: trackData.albumUrl || trackData?.song?.metadata?.albumUrl || null,
       animationUrl: trackData.animationUrl || trackData?.song?.metadata?.animationUrl || null,
+      masterTallUrl: trackData.masterTallUrl || trackData?.song?.metadata?.masterTallUrl || null,
       isLovedInService: trackData.isLovedInService || trackData?.song?.metadata?.userloved || false,
       // pass through spotify summary if available on trackData
       spotify: trackData.spotify || null,
