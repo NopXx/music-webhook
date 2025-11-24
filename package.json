@@ -1,6 +1,6 @@
 {
   "name": "music-webhook",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Webhook server for receiving web-scrobbler data and storing to MongoDB",
   "type": "module",
   "main": "index.js",
