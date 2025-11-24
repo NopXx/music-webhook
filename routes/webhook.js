@@ -2,6 +2,16 @@ import Track from '../models/Track.js';
 import spotifyService from '../services/spotifyService.js';
 import nowPlayingService from '../services/nowPlayingService.js';
 import { normalizeListenBrainzEntry } from '../middleware/validation.js';
+import {
+  getStatsOverview,
+  getTracksListing,
+  updateLovedTrackStatus as setLovedFlag,
+  getTopArtistsLeaderboard as fetchTopArtistsLeaderboard,
+  getTopTracksLeaderboard as fetchTopTracksLeaderboard,
+  getTrackInsights,
+  getAlbumInsights,
+  getArtistProfileData
+} from '../services/analyticsService.js';
 
 export class WebhookRoutes {
   constructor() {
@@ -20,6 +30,12 @@ export class WebhookRoutes {
     this.renderListenBrainzImportPage = this.renderListenBrainzImportPage.bind(this);
     this.importListenBrainz = this.importListenBrainz.bind(this);
     this.deleteTracksByDateRange = this.deleteTracksByDateRange.bind(this);
+    this.updateTrackLovedStatus = this.updateTrackLovedStatus.bind(this);
+    this.getTopArtistsLeaderboard = this.getTopArtistsLeaderboard.bind(this);
+    this.getTopTracksLeaderboard = this.getTopTracksLeaderboard.bind(this);
+    this.getTrackAnalytics = this.getTrackAnalytics.bind(this);
+    this.getAlbumAnalytics = this.getAlbumAnalytics.bind(this);
+    this.getArtistProfile = this.getArtistProfile.bind(this);
   }
 
   // Handle incoming scrobble data
@@ -1246,14 +1262,19 @@ export class WebhookRoutes {
   // Get statistics
   async getStats(req, res) {
     try {
-      const totalTracks = await Track.countDocuments();
-      const topArtists = await Track.getTopArtists(10);
-      const recentActivity = await Track.find()
-        .sort({ scrobbledAt: -1 })
-        .limit(5)
-        .select('artist title scrobbledAt source connector spotify_enriched');
+      const range = req.query.range || 'all-time';
+      const offset = Number.isFinite(Number(req.query.offset)) ? Number(req.query.offset) : 0;
+      const recentLimit = Number.isFinite(Number(req.query.recentLimit))
+        ? Math.max(1, Math.min(25, Number(req.query.recentLimit)))
+        : 10;
 
-      // Get Spotify statistics
+      const overview = await getStatsOverview({
+        range,
+        offset,
+        recentLimit,
+        topArtistLimit: Number(req.query.topArtistLimit) || 5
+      });
+
       let spotifyStats = null;
       if (spotifyService.isConfigured()) {
         try {
@@ -1282,15 +1303,15 @@ export class WebhookRoutes {
         spotifyStats = { configured: false, message: 'Spotify integration not configured' };
       }
 
-      const stats = {
-        totalTracks,
-        topArtists,
-        recentActivity,
-        lastScrobble: recentActivity[0]?.scrobbledAt || null,
+      res.status(200).json({
+        range: overview.window,
+        totals: overview.totals,
+        connectors: overview.connectors,
+        topArtists: overview.topArtists,
+        recentScrobbles: overview.recent,
+        lastScrobble: overview.recent?.[0]?.scrobbledAt || null,
         spotify: spotifyStats
-      };
-
-      res.status(200).json(stats);
+      });
 
     } catch (error) {
       console.error('❌ Error getting stats:', error);
@@ -1305,26 +1326,20 @@ export class WebhookRoutes {
   // Get recent tracks
   async getRecentTracks(req, res) {
     try {
-      const limit = parseInt(req.query.limit || '50');
-      const offset = parseInt(req.query.offset || '0');
-
-      const tracks = await Track.find()
-        .sort({ scrobbledAt: -1 })
-        .skip(offset)
-        .limit(Math.min(limit, 100)) // Max 100 per request
-        .select('title artist album scrobbledAt source connector duration');
-
-      const total = await Track.countDocuments();
-
-      res.status(200).json({
-        tracks,
-        pagination: {
-          limit,
-          offset,
-          total,
-          hasMore: offset + limit < total
-        }
+      const listing = await getTracksListing({
+        page: req.query.page,
+        limit: req.query.limit,
+        offset: req.query.offset,
+        sortBy: req.query.sortBy,
+        order: req.query.order,
+        search: req.query.search,
+        connector: req.query.connector,
+        source: req.query.source,
+        range: req.query.range,
+        rangeOffset: req.query.rangeOffset
       });
+
+      res.status(200).json(listing);
 
     } catch (error) {
       console.error('❌ Error getting recent tracks:', error);
@@ -1332,6 +1347,210 @@ export class WebhookRoutes {
       res.status(500).json({ 
         error: 'Failed to get recent tracks',
         message: error.message 
+      });
+    }
+  }
+
+  async updateTrackLovedStatus(req, res) {
+    try {
+      const { id, isLoved } = req.body || {};
+      if (!id) {
+        return res.status(400).json({
+          error: 'Missing track id',
+          message: 'Please provide track id in request body'
+        });
+      }
+
+      if (typeof isLoved !== 'boolean') {
+        return res.status(400).json({
+          error: 'Invalid payload',
+          message: 'isLoved must be a boolean value'
+        });
+      }
+
+      const updated = await setLovedFlag({ id, isLoved });
+      res.status(200).json({
+        success: true,
+        track: updated
+      });
+    } catch (error) {
+      console.error('❌ Error updating loved status:', error);
+      const statusCode = error.message === 'Track not found' ? 404 : 500;
+      res.status(statusCode).json({
+        error: statusCode === 404 ? 'Track not found' : 'Failed to update loved status',
+        message: error.message
+      });
+    }
+  }
+
+  async getTopArtistsLeaderboard(req, res) {
+    try {
+      const range = req.query.range || 'week';
+      const offset = Number.isFinite(Number(req.query.offset)) ? Number(req.query.offset) : 0;
+      const limit = Number.isFinite(Number(req.query.limit)) ? Number(req.query.limit) : 10;
+
+      const leaderboard = await fetchTopArtistsLeaderboard({
+        range,
+        offset,
+        limit
+      });
+
+      res.status(200).json(leaderboard);
+    } catch (error) {
+      console.error('❌ Error getting top artists leaderboard:', error);
+      res.status(500).json({
+        error: 'Failed to get top artists leaderboard',
+        message: error.message
+      });
+    }
+  }
+
+  async getTopTracksLeaderboard(req, res) {
+    try {
+      const range = req.query.range || 'week';
+      const offset = Number.isFinite(Number(req.query.offset)) ? Number(req.query.offset) : 0;
+      const limit = Number.isFinite(Number(req.query.limit)) ? Number(req.query.limit) : 15;
+
+      const leaderboard = await fetchTopTracksLeaderboard({
+        range,
+        offset,
+        limit
+      });
+
+      res.status(200).json(leaderboard);
+    } catch (error) {
+      console.error('❌ Error getting top tracks leaderboard:', error);
+      res.status(500).json({
+        error: 'Failed to get top tracks leaderboard',
+        message: error.message
+      });
+    }
+  }
+
+  async getTrackAnalytics(req, res) {
+    try {
+      const { artist, title, recentLimit, tz } = req.query || {};
+      if (!artist || !title) {
+        return res.status(400).json({
+          error: 'Missing parameters',
+          message: 'artist and title are required'
+        });
+      }
+
+      const insights = await getTrackInsights({
+        artist,
+        title,
+        recentLimit: Number.isFinite(Number(recentLimit)) ? Number(recentLimit) : 12,
+        timezone: tz
+      });
+
+      if (!insights) {
+        return res.status(404).json({
+          error: 'Not found',
+          message: 'Track analytics not available (no scrobbles found)'
+        });
+      }
+
+      res.status(200).json({
+        meta: {
+          artist,
+          title,
+          timezone: tz || undefined
+        },
+        ...insights
+      });
+    } catch (error) {
+      console.error('❌ Error getting track analytics:', error);
+      res.status(500).json({
+        error: 'Failed to get track analytics',
+        message: error.message
+      });
+    }
+  }
+
+  async getAlbumAnalytics(req, res) {
+    try {
+      const { artist, album, recentLimit, tz } = req.query || {};
+      if (!artist || !album) {
+        return res.status(400).json({
+          error: 'Missing parameters',
+          message: 'artist and album are required'
+        });
+      }
+
+      const insights = await getAlbumInsights({
+        artist,
+        album,
+        recentLimit: Number.isFinite(Number(recentLimit)) ? Number(recentLimit) : 12,
+        timezone: tz
+      });
+
+      if (!insights) {
+        return res.status(404).json({
+          error: 'Not found',
+          message: 'Album analytics not available (no scrobbles found)'
+        });
+      }
+
+      res.status(200).json({
+        meta: {
+          artist,
+          album,
+          timezone: tz || undefined
+        },
+        ...insights
+      });
+    } catch (error) {
+      console.error('❌ Error getting album analytics:', error);
+      res.status(500).json({
+        error: 'Failed to get album analytics',
+        message: error.message
+      });
+    }
+  }
+
+  async getArtistProfile(req, res) {
+    try {
+      const rawName = req.params.name || '';
+      let decodedName = rawName;
+      try {
+        decodedName = decodeURIComponent(rawName);
+      } catch (decodeError) {
+        console.warn('⚠️ Unable to decode artist name from path, using raw value');
+      }
+      const { tz, limit, recentLimit } = req.query || {};
+
+      if (!decodedName) {
+        return res.status(400).json({
+          error: 'Missing artist name',
+          message: 'Artist name is required in the path parameter'
+        });
+      }
+
+      const profile = await getArtistProfileData({
+        name: decodedName,
+        tz,
+        topLimit: Number.isFinite(Number(limit)) ? Number(limit) : 10,
+        recentLimit: Number.isFinite(Number(recentLimit)) ? Number(recentLimit) : 15
+      });
+
+      if (!profile) {
+        return res.status(404).json({
+          error: 'Not found',
+          message: 'Artist profile not available (no scrobbles found)'
+        });
+      }
+
+      res.status(200).json({
+        artist: decodedName,
+        timezone: tz || undefined,
+        ...profile
+      });
+    } catch (error) {
+      console.error('❌ Error getting artist profile:', error);
+      res.status(500).json({
+        error: 'Failed to get artist profile',
+        message: error.message
       });
     }
   }
@@ -2028,7 +2247,13 @@ export class WebhookRoutes {
           'POST /api/nowplaying/playing': 'Set or refresh Now Playing status (supports playing/paused/stopped)'
         },
         listeningData: {
-          'GET /api/tracks?limit=50&offset=0': 'List recent tracks',
+        'GET /api/tracks?page=1&limit=50': 'List tracks with pagination/search',
+        'PATCH /api/tracks': 'Update loved flag for a track (body: { id, isLoved })',
+        'GET /api/tracks/top-artists?range=week': 'Top artists leaderboard',
+        'GET /api/tracks/top-tracks?range=week': 'Top tracks leaderboard',
+        'GET /api/track?artist=<name>&title=<title>': 'Single track analytics',
+        'GET /api/albums?artist=<name>&album=<album>': 'Album analytics overview',
+        'GET /api/artists/:name': 'Artist profile + timeline',
           'DELETE /api/tracks/range?start=<ISO>&end=<ISO>&dryRun=true': 'Delete tracks within a scrobbledAt date range (optional source/connector filters)',
           'GET /api/stats': 'Aggregate listening statistics',
           'GET /api/health': 'Health check endpoint'

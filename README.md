@@ -89,13 +89,21 @@
 | Method | Endpoint | คำอธิบาย |
 |--------|----------|-----------|
 | GET    | `/api/health` | ตรวจสอบสถานะเซิร์ฟเวอร์ |
-| GET    | `/api/stats`  | สถิติรวม + ข้อมูล Spotify enrichment |
-| GET    | `/api/tracks?limit=50&offset=0` | รายการเพลงล่าสุด |
+| GET    | `/api/stats?range=week`  | สถิติรวม + ตัวเลือก range/offset + Spotify |
+| GET    | `/api/tracks?page=1&limit=50&search=` | รายการเพลงทั้งหมดพร้อมค้นหา/จัดเรียง |
+| PATCH  | `/api/tracks` | อัปเดตสถานะ Loved ของเพลง (`{ id, isLoved }`) |
+| GET    | `/api/tracks/top-artists?range=month&limit=10` | Leaderboard ศิลปินยอดนิยม |
+| GET    | `/api/tracks/top-tracks?range=month&limit=15` | Leaderboard เพลงยอดนิยม |
+| GET    | `/api/track?artist=<name>&title=<title>` | Analytics เพลงเดี่ยว (distribution, connectors, Spotify) |
+| GET    | `/api/albums?artist=<name>&album=<album>` | สถิติอัลบัม + timeline 30 วัน |
+| GET    | `/api/artists/:name` | โปรไฟล์ศิลปิน (top tracks/albums, timeline, recent) |
 | GET    | `/api/nowplaying` | ดูสถานะ Now Playing ในหน่วยความจำ |
 | POST   | `/api/nowplaying/playing` | ตั้ง/อัปเดตสถานะ Now Playing เอง |
 | POST   | `/webhook/scrobble` | รับข้อมูล scrobble/nowplaying (ทุกฟอร์แมต) |
 | POST   | `/api/import/listenbrainz` | นำเข้าข้อมูล ListenBrainz (JSON หรือ JSON Lines) แบบเป็นกลุ่ม |
 | DELETE | `/api/tracks/range?start=<ISO>&end=<ISO>&dryRun=true` | ลบข้อมูลตามช่วงวันที่ (รองรับกรอง source/connector) |
+
+> 📚 รายละเอียดพารามิเตอร์ของ endpoint ชุดสถิติ/analytics ดูเพิ่มได้ใน `docs/analytics-api.md`
 
 ### Spotify Integration
 | Method | Endpoint | การใช้งาน |

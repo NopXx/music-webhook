@@ -1,207 +1,242 @@
 /**
  * Last.fm API Service
- * ดึงข้อมูลเพิ่มเติมของ track จาก Last.fm API
+ * ดึงข้อมูลเพิ่มเติมจาก Last.fm ทั้ง track / artist / album
  */
 export class LastFmService {
   constructor() {
     this.apiKey = process.env.LASTFM_API_KEY;
     this.baseUrl = 'https://ws.audioscrobbler.com/2.0/';
-    
+    this.userAgent = 'MusicWebhookServer/1.0';
+
     if (!this.apiKey) {
-      console.warn('⚠️ LASTFM_API_KEY not found in environment variables. Last.fm enrichment will be disabled.');
+      console.warn('⚠️ LASTFM_API_KEY not found. Last.fm helpers will fall back to placeholder images.');
     }
   }
 
-  /**
-   * ดึงข้อมูลเพิ่มเติมของ track จาก Last.fm
-   * @param {string} artist - ชื่อศิลปิน
-   * @param {string} track - ชื่อเพลง
-   * @param {string} album - ชื่ออัลบั้ม (optional)
-   * @returns {Promise<Object|null>} ข้อมูลเพิ่มเติมของ track หรือ null ถ้าไม่พบ
-   */
-  async getTrackInfo(artist, track, album = null) {
-    if (!this.apiKey) {
-      console.log('🔕 Last.fm API key not configured, skipping track enrichment');
+  isConfigured() {
+    return Boolean(this.apiKey);
+  }
+
+  buildParams(method, extra = {}) {
+    const params = new URLSearchParams({
+      method,
+      format: 'json',
+      api_key: this.apiKey || ''
+    });
+
+    Object.entries(extra || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        params.append(key, value);
+      }
+    });
+
+    return params;
+  }
+
+  async request(method, params = {}) {
+    if (!this.isConfigured()) {
       return null;
     }
 
     try {
-      const params = new URLSearchParams({
-        method: 'track.getInfo',
-        api_key: this.apiKey,
-        artist: artist,
-        track: track,
-        format: 'json'
-      });
-
-      if (album) {
-        params.append('album', album);
-      }
-
-      console.log(`🔍 Fetching track info from Last.fm: ${artist} - ${track}`);
-      
-      const response = await fetch(`${this.baseUrl}?${params}`, {
+      const query = this.buildParams(method, params);
+      const response = await fetch(`${this.baseUrl}?${query.toString()}`, {
         method: 'GET',
         headers: {
-          'User-Agent': 'MusicWebhookServer/1.0'
+          'User-Agent': this.userAgent
         }
       });
 
       if (!response.ok) {
-        throw new Error(`Last.fm API returned ${response.status}: ${response.statusText}`);
+        throw new Error(`Last.fm API responded with ${response.status}`);
       }
 
       const data = await response.json();
-      
       if (data.error) {
         console.warn(`⚠️ Last.fm API error: ${data.message}`);
         return null;
       }
 
-      if (!data.track) {
-        console.log(`📭 Track not found in Last.fm: ${artist} - ${track}`);
-        return null;
-      }
-
-      console.log(`✅ Found track info in Last.fm: ${artist} - ${track}`);
-      return this.processTrackData(data.track);
-
+      return data;
     } catch (error) {
-      console.error(`❌ Error fetching track info from Last.fm:`, error.message);
+      console.error(`❌ Last.fm request failed (${method}):`, error.message);
       return null;
     }
   }
 
-  /**
-   * ดึงข้อมูลศิลปินจาก Last.fm
-   * @param {string} artist - ชื่อศิลปิน
-   * @returns {Promise<Object|null>} ข้อมูลศิลปิน หรือ null ถ้าไม่พบ
-   */
+  async getTrackInfo(artist, track, album = null) {
+    if (!artist || !track) return null;
+
+    const payload = await this.request('track.getInfo', {
+      artist,
+      track,
+      album
+    });
+
+    if (!payload?.track) {
+      return null;
+    }
+
+    return this.processTrackData(payload.track);
+  }
+
   async getArtistInfo(artist) {
-    if (!this.apiKey) {
+    if (!artist) return null;
+
+    const payload = await this.request('artist.getInfo', {
+      artist
+    });
+
+    if (!payload?.artist) {
       return null;
     }
 
-    try {
-      const params = new URLSearchParams({
-        method: 'artist.getInfo',
-        api_key: this.apiKey,
-        artist: artist,
-        format: 'json'
-      });
-
-      console.log(`🔍 Fetching artist info from Last.fm: ${artist}`);
-      
-      const response = await fetch(`${this.baseUrl}?${params}`, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'MusicWebhookServer/1.0'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`Last.fm API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.error || !data.artist) {
-        return null;
-      }
-
-      console.log(`✅ Found artist info in Last.fm: ${artist}`);
-      return this.processArtistData(data.artist);
-
-    } catch (error) {
-      console.error(`❌ Error fetching artist info from Last.fm:`, error.message);
-      return null;
-    }
+    return this.processArtistData(payload.artist);
   }
 
-  /**
-   * ดึงข้อมูลอัลบั้มจาก Last.fm
-   * @param {string} artist - ชื่อศิลปิน
-   * @param {string} album - ชื่ออัลบั้ม
-   * @returns {Promise<Object|null>} ข้อมูลอัลบั้ม หรือ null ถ้าไม่พบ
-   */
   async getAlbumInfo(artist, album) {
-    if (!this.apiKey || !album) {
+    if (!artist || !album) return null;
+
+    const payload = await this.request('album.getInfo', {
+      artist,
+      album
+    });
+
+    if (!payload?.album) {
       return null;
     }
 
-    try {
-      const params = new URLSearchParams({
-        method: 'album.getInfo',
-        api_key: this.apiKey,
-        artist: artist,
-        album: album,
-        format: 'json'
-      });
-
-      console.log(`🔍 Fetching album info from Last.fm: ${artist} - ${album}`);
-      
-      const response = await fetch(`${this.baseUrl}?${params}`, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'MusicWebhookServer/1.0'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`Last.fm API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.error || !data.album) {
-        return null;
-      }
-
-      console.log(`✅ Found album info in Last.fm: ${artist} - ${album}`);
-      return this.processAlbumData(data.album);
-
-    } catch (error) {
-      console.error(`❌ Error fetching album info from Last.fm:`, error.message);
-      return null;
-    }
+    return this.processAlbumData(payload.album);
   }
 
-  /**
-   * ประมวลผลข้อมูล track จาก Last.fm API
-   */
+  pickBestImage(images = []) {
+    if (!Array.isArray(images)) {
+      return null;
+    }
+
+    const prioritized = ['mega', 'extralarge', 'large'];
+    for (const size of prioritized) {
+      const found = images.find((img) => img?.size === size && img['#text']);
+      if (found) {
+        return {
+          url: found['#text'],
+          size: size
+        };
+      }
+    }
+
+    const fallback = images.find((img) => img?.['#text']);
+    if (fallback) {
+      return {
+        url: fallback['#text'],
+        size: fallback.size || 'unknown'
+      };
+    }
+
+    return null;
+  }
+
   processTrackData(trackData) {
     const images = trackData.album?.image || trackData.image || [];
-    const largeImage = images.find(img => img.size === 'large') || images.find(img => img.size === 'extralarge') || images[images.length - 1];
+    const bestImage = this.pickBestImage(images);
 
     return {
-      // ข้อมูลพื้นฐาน
       name: trackData.name,
       artist: trackData.artist?.name || trackData.artist,
       album: trackData.album?.title || trackData.album,
-      
-      // MBID (MusicBrainz ID)
-      mbid: trackData.mbid,
-      artistMbid: trackData.artist?.mbid,
-      albumMbid: trackData.album?.mbid,
-      
-      // URLs
+      mbid: trackData.mbid || null,
+      artistMbid: trackData.artist?.mbid || null,
+      albumMbid: trackData.album?.mbid || null,
       url: trackData.url,
       artistUrl: trackData.artist?.url,
       albumUrl: trackData.album?.url,
-      
-      // รูปภาพ
-      trackArtUrl: largeImage?.['#text'] || null,
-      
-      // สถิติ
-      playcount: parseInt(trackData.playcount) || 0,
-      listeners: parseInt(trackData.listeners) || 0,
-      userplaycount: parseInt(trackData.userplaycount) || 0,
+      trackArtUrl: bestImage?.url || null,
+      playcount: parseInt(trackData.playcount, 10) || 0,
+      listeners: parseInt(trackData.listeners, 10) || 0,
+      userplaycount: parseInt(trackData.userplaycount, 10) || 0,
       userloved: trackData.userloved === '1',
-      
-      // เวลา
-      duration: parseInt(trackData.duration) || null,
-      
-      // แท็ก
-      tags: trackData.toptags?.tag?.map(tag => tag.name) || [],
-      
-      // ส
+      duration: parseInt(trackData.duration, 10) || null,
+      tags: trackData.toptags?.tag?.map((tag) => tag.name) || [],
+      wiki: trackData.wiki
+        ? {
+            summary: trackData.wiki.summary,
+            content: trackData.wiki.content
+          }
+        : null
+    };
+  }
+
+  processArtistData(artistData) {
+    const images = (artistData.image || [])
+      .map((img) => ({
+        url: img['#text'],
+        size: img.size
+      }))
+      .filter((img) => img.url);
+
+    const heroImage = this.pickBestImage(artistData.image || []);
+
+    return {
+      name: artistData.name,
+      mbid: artistData.mbid || null,
+      url: artistData.url,
+      bio: artistData.bio
+        ? {
+            summary: artistData.bio.summary,
+            content: artistData.bio.content
+          }
+        : null,
+      stats: {
+        listeners: parseInt(artistData.stats?.listeners, 10) || 0,
+        playcount: parseInt(artistData.stats?.playcount, 10) || 0
+      },
+      tags: artistData.tags?.tag?.map((tag) => tag.name) || [],
+      images,
+      heroImage: heroImage?.url || null
+    };
+  }
+
+  processAlbumData(albumData) {
+    const images = (albumData.image || [])
+      .map((img) => ({
+        url: img['#text'],
+        size: img.size
+      }))
+      .filter((img) => img.url);
+
+    const heroImage = this.pickBestImage(albumData.image || []);
+
+    return {
+      name: albumData.name || albumData.album,
+      artist: albumData.artist,
+      mbid: albumData.mbid || null,
+      url: albumData.url,
+      listeners: parseInt(albumData.listeners, 10) || 0,
+      playcount: parseInt(albumData.playcount, 10) || 0,
+      tracks: Array.isArray(albumData.tracks?.track)
+        ? albumData.tracks.track.map((track) => ({
+            name: track.name,
+            duration: parseInt(track.duration, 10) || null,
+            url: track.url
+          }))
+        : [],
+      wiki: albumData.wiki
+        ? {
+            summary: albumData.wiki.summary,
+            content: albumData.wiki.content
+          }
+        : null,
+      images,
+      heroImage: heroImage?.url || null
+    };
+  }
+
+  async getArtistImageUrl(artist) {
+    const info = await this.getArtistInfo(artist);
+    return info?.heroImage || null;
+  }
+}
+
+const lastFmInstance = new LastFmService();
+
+export default lastFmInstance;

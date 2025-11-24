@@ -119,6 +119,15 @@ class MusicWebhookServer {
     // API endpoints
     this.app.get('/api/stats', asyncHandler(webhookRoutes.getStats));
     this.app.get('/api/tracks', asyncHandler(webhookRoutes.getRecentTracks));
+    this.app.patch('/api/tracks',
+      validateContentType,
+      asyncHandler(webhookRoutes.updateTrackLovedStatus)
+    );
+    this.app.get('/api/tracks/top-artists', asyncHandler(webhookRoutes.getTopArtistsLeaderboard));
+    this.app.get('/api/tracks/top-tracks', asyncHandler(webhookRoutes.getTopTracksLeaderboard));
+    this.app.get('/api/track', asyncHandler(webhookRoutes.getTrackAnalytics));
+    this.app.get('/api/albums', asyncHandler(webhookRoutes.getAlbumAnalytics));
+    this.app.get('/api/artists/:name', asyncHandler(webhookRoutes.getArtistProfile));
     this.app.get('/api/nowplaying', asyncHandler(webhookRoutes.getNowPlaying));
     this.app.post('/api/nowplaying/playing', validateContentType, asyncHandler(webhookRoutes.setNowPlaying));
     this.app.get('/import/listenbrainz', webhookRoutes.renderListenBrainzImportPage);
@@ -148,7 +157,13 @@ class MusicWebhookServer {
         version: '1.0.0',
         endpoints: {
           'GET /api/stats': 'Get scrobbling statistics',
-          'GET /api/tracks': 'Get recent tracks',
+          'GET /api/tracks': 'Get tracks with pagination/search',
+          'PATCH /api/tracks': 'Toggle loved flag for a track',
+          'GET /api/tracks/top-artists': 'Top artists leaderboard',
+          'GET /api/tracks/top-tracks': 'Top tracks leaderboard',
+          'GET /api/track': 'Single track analytics',
+          'GET /api/albums': 'Album analytics',
+          'GET /api/artists/:name': 'Artist profile',
           'GET /api/nowplaying': 'Get current now playing status',
           'POST /api/nowplaying/playing': 'Set or refresh now playing status',
           'GET /api/health': 'Health check',
