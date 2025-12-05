@@ -409,12 +409,27 @@ export const getTracksListing = async ({
     .limit(sanitizedLimit)
     .lean();
 
+  // คำนวณ userPlayCount สำหรับแต่ละ track
+  const tracksWithPlayCount = await Promise.all(
+    tracks.map(async (track) => {
+      const playCount = await Track.countDocuments({
+        eventType: 'scrobble',
+        artist: { $regex: new RegExp(`^${track.artist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        title: { $regex: new RegExp(`^${track.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+      });
+      return {
+        ...track,
+        userPlayCount: playCount
+      };
+    })
+  );
+
   const effectivePage = offset
     ? Math.floor(skip / sanitizedLimit) + 1
     : sanitizedPage;
 
   return {
-    tracks,
+    tracks: tracksWithPlayCount,
     pagination: {
       page: effectivePage,
       limit: sanitizedLimit,
@@ -770,10 +785,18 @@ export const getTrackInsights = async ({
 
   const spotifyTrack = await Track.findOne(baseMatch)
     .sort({ spotify_enriched: -1, scrobbledAt: -1 })
-    .select('spotify spotify_enriched spotify_match_found spotify_search_attempted trackArtUrl albumUrl')
+    .select('spotify spotify_enriched spotify_match_found spotify_search_attempted album trackArtUrl animationUrl albumUrl appleMusicUrl')
     .lean();
 
   return {
+    meta: {
+      title: title,
+      artist: artist,
+      album: spotifyTrack?.album || null,
+      trackArtUrl: spotifyTrack?.trackArtUrl || null,
+      animationUrl: spotifyTrack?.animationUrl || null,
+      appleMusicUrl: spotifyTrack?.appleMusicUrl || null
+    },
     overview: {
       totalScrobbles: overview.plays,
       firstPlay: overview.firstPlay,
@@ -908,7 +931,20 @@ export const getAlbumInsights = async ({
     return null;
   }
 
+  // ดึงข้อมูล meta จาก track ล่าสุด
+  const latestTrack = await Track.findOne(baseMatch)
+    .sort({ scrobbledAt: -1 })
+    .select('trackArtUrl animationUrl appleMusicUrl')
+    .lean();
+
   return {
+    meta: {
+      artist: artist,
+      album: album,
+      trackArtUrl: latestTrack?.trackArtUrl || result?.recent?.[0]?.trackArtUrl || null,
+      animationUrl: latestTrack?.animationUrl || null,
+      appleMusicUrl: latestTrack?.appleMusicUrl || null
+    },
     overview: {
       totalScrobbles: overview.plays,
       firstPlay: overview.firstPlay,
@@ -924,6 +960,7 @@ export const getAlbumInsights = async ({
     timeline: result?.timeline || [],
     recent: result?.recent || [],
     coverArt:
+      latestTrack?.trackArtUrl ||
       result?.recent?.[0]?.trackArtUrl ||
       result?.recent?.[0]?.albumUrl ||
       null

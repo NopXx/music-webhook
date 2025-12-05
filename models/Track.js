@@ -233,6 +233,19 @@ const trackSchema = new mongoose.Schema({
     default: false
   },
 
+  // Animation (Apple Music) enrichment status
+  animation_search_attempted: {
+    type: Boolean,
+    default: false
+  },
+  animation_match_found: {
+    type: Boolean,
+    default: false
+  },
+  appleMusicUrl: {
+    type: String, // Apple Music URL for the track
+  },
+
   // Metadata
   userAgent: {
     type: String,

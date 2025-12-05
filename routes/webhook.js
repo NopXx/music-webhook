@@ -1,5 +1,6 @@
 import Track from '../models/Track.js';
 import spotifyService from '../services/spotifyService.js';
+import appleMusicService from '../services/appleMusicService.js';
 import nowPlayingService from '../services/nowPlayingService.js';
 import { normalizeListenBrainzEntry } from '../middleware/validation.js';
 import {
@@ -36,6 +37,7 @@ export class WebhookRoutes {
     this.getTrackAnalytics = this.getTrackAnalytics.bind(this);
     this.getAlbumAnalytics = this.getAlbumAnalytics.bind(this);
     this.getArtistProfile = this.getArtistProfile.bind(this);
+    this.enrichWithAnimationData = this.enrichWithAnimationData.bind(this);
   }
 
   // Handle incoming scrobble data
@@ -86,6 +88,20 @@ export class WebhookRoutes {
             console.error(`❌ Failed to enrich track ${savedTrack._id} with Spotify data:`, error.message);
           });
         }, 100); // รอ 100ms ให้ response ออกไปก่อน
+      }
+
+      // Enrich animationUrl ถ้าไม่มีข้อมูล (ใช้ Apple Music API)
+      const shouldEnrichAnimation = 
+        (savedTrack.action === 'created' || savedTrack.action === 'updated') &&
+        !savedTrack.animationUrl &&
+        !savedTrack.animation_search_attempted;
+        
+      if (shouldEnrichAnimation) {
+        setTimeout(() => {
+          this.enrichWithAnimationData(savedTrack).catch(error => {
+            console.error(`❌ Failed to enrich track ${savedTrack._id} with animation data:`, error.message);
+          });
+        }, 200); // รอ 200ms ให้ Spotify enrich ไปก่อน
       }
       
       const message = savedTrack.action === 'created' ? 'Track saved successfully' :
@@ -1866,6 +1882,87 @@ export class WebhookRoutes {
           console.log(`⚠️ Track ${track._id} no longer exists`);
         } else {
           console.error(`❌ Error saving search attempt status:`, saveError.message);
+        }
+      }
+    }
+  }
+
+  // Enrich track with animated artwork from Apple Music
+  async enrichWithAnimationData(track) {
+    try {
+      console.log(`🎬 Searching animated artwork for: ${track.artist} - ${track.title}`);
+      
+      // ค้นหาและดึง animated artwork
+      const result = await appleMusicService.fetchAnimatedArtwork(
+        track.title,
+        track.artist,
+        track.album || ''
+      );
+      
+      if (result.success && result.animationUrl) {
+        console.log(`✨ Found animated artwork for: ${track.artist} - ${track.title}`);
+        console.log(`   Animation URL: ${result.animationUrl}`);
+        
+        // อัปเดต track ด้วย animationUrl
+        const updateData = {
+          animationUrl: result.animationUrl,
+          animation_search_attempted: true,
+          animation_match_found: true
+        };
+        
+        // เก็บ Apple Music URL ไว้ด้วย (ถ้ามี)
+        if (result.appleMusicUrl) {
+          updateData.appleMusicUrl = result.appleMusicUrl;
+        }
+        
+        const updatedTrack = await Track.findByIdAndUpdate(
+          track._id,
+          { $set: updateData },
+          { new: true, runValidators: true }
+        );
+        
+        if (updatedTrack) {
+          console.log(`✅ Animation enrichment completed for: ${track.artist} - ${track.title}`);
+        } else {
+          console.log(`⚠️ Track not found during animation update: ${track._id}`);
+        }
+        
+      } else {
+        // Mark as searched but no animated artwork found
+        await Track.findByIdAndUpdate(
+          track._id,
+          { 
+            $set: {
+              animation_search_attempted: true,
+              animation_match_found: false
+            }
+          }
+        );
+        console.log(`❌ No animated artwork found for: ${track.artist} - ${track.title}`);
+        if (result.error) {
+          console.log(`   Reason: ${result.error}`);
+        }
+      }
+      
+    } catch (error) {
+      console.error(`❌ Error enriching track ${track._id} with animation:`, error.message);
+      
+      // Mark as searched even if error occurred
+      try {
+        await Track.findByIdAndUpdate(
+          track._id,
+          { 
+            $set: {
+              animation_search_attempted: true,
+              animation_match_found: false
+            }
+          }
+        );
+      } catch (saveError) {
+        if (saveError.message.includes('Cast to ObjectId failed')) {
+          console.log(`⚠️ Track ${track._id} no longer exists`);
+        } else {
+          console.error(`❌ Error saving animation search attempt status:`, saveError.message);
         }
       }
     }
