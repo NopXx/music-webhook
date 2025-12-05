@@ -599,11 +599,10 @@ export const getTopTracksLeaderboard = async ({
       album: doc.album,
       plays: doc.plays,
       lastPlay: doc.lastPlay?.scrobbledAt,
-      latestMedia:
-        doc.lastPlay?.trackArtUrl ||
-        doc.lastPlay?.animationUrl ||
-        doc.lastPlay?.albumUrl ||
-        null
+      latestMedia: {
+        trackArtUrl: doc.lastPlay?.trackArtUrl || null,
+        animationUrl: doc.lastPlay?.animationUrl || null
+      }
     }))
   };
 };
