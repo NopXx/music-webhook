@@ -1,4 +1,5 @@
 import axios from 'axios';
+import Cache from '../models/Cache.js';
 
 class SpotifyService {
   constructor() {
@@ -10,9 +11,7 @@ class SpotifyService {
     // Spotify API base URL
     this.baseURL = 'https://api.spotify.com/v1';
     
-    // Cache untuk search results (ลดการเรียก API ซ้ำ)
-    this.searchCache = new Map();
-    this.cacheTimeout = 30 * 60 * 1000; // 30 minutes
+    this.cacheTimeout = 30 * 24 * 60 * 60 * 1000; // 30 days (Long-term cache)
   }
 
   // ตรวจสอบว่า credentials ครบหรือไม่
@@ -58,22 +57,22 @@ class SpotifyService {
 
   // สร้าง cache key สำหรับ search
   createCacheKey(artist, title) {
-    return `${artist.toLowerCase().trim()}|${title.toLowerCase().trim()}`;
+    return `spotify:${artist.toLowerCase().trim()}|${title.toLowerCase().trim()}`;
   }
 
   // ค้นหา track จาก Spotify API
   async searchTrack(artist, title) {
     const cacheKey = this.createCacheKey(artist, title);
     
-    // ตรวจสอบ cache ก่อน
-    if (this.searchCache.has(cacheKey)) {
-      const cached = this.searchCache.get(cacheKey);
-      if (Date.now() - cached.timestamp < this.cacheTimeout) {
-        console.log(`🗄️ Spotify cache hit: ${artist} - ${title}`);
+    try {
+      // ตรวจสอบ cache จาก DB
+      const cached = await Cache.findOne({ key: cacheKey });
+      if (cached) {
+        console.log(`🗄️ Spotify cache hit (DB): ${artist} - ${title}`);
         return cached.data;
-      } else {
-        this.searchCache.delete(cacheKey);
       }
+    } catch (err) {
+      console.error('⚠️ Cache read error:', err.message);
     }
 
     const token = await this.getAccessToken();
@@ -105,11 +104,8 @@ class SpotifyService {
       
       if (tracks.length === 0) {
         console.log(`🔍 No Spotify results for: ${artist} - ${title}`);
-        // Cache null result เพื่อไม่ให้ค้นหาซ้ำ
-        this.searchCache.set(cacheKey, {
-          data: null,
-          timestamp: Date.now()
-        });
+        // Cache null result (TTL 7 days)
+        await this.saveToCache(cacheKey, null, 7 * 24 * 60 * 60 * 1000);
         return null;
       }
 
@@ -129,18 +125,12 @@ class SpotifyService {
         enrichedData.match_confidence = confidence;
         
         // Cache ผลลัพธ์
-        this.searchCache.set(cacheKey, {
-          data: enrichedData,
-          timestamp: Date.now()
-        });
+        await this.saveToCache(cacheKey, enrichedData, this.cacheTimeout);
         
         return enrichedData;
       } else {
         console.log(`🎵 No good Spotify match for: ${artist} - ${title} (confidence too low)`);
-        this.searchCache.set(cacheKey, {
-          data: null,
-          timestamp: Date.now()
-        });
+        await this.saveToCache(cacheKey, null, 7 * 24 * 60 * 60 * 1000);
         return null;
       }
 
@@ -149,11 +139,9 @@ class SpotifyService {
         console.error(`❌ Spotify search timeout for "${artist} - ${title}"`);
       } else if (error.response?.status === 429) {
         console.error(`❌ Spotify rate limit exceeded for "${artist} - ${title}"`);
-        // Don't cache rate limit errors
         return null;
       } else if (error.response?.status >= 500) {
         console.error(`❌ Spotify server error (${error.response.status}) for "${artist} - ${title}"`);
-        // Don't cache server errors
         return null;
       } else {
         console.error(`❌ Spotify search error for "${artist} - ${title}":`, error.response?.data?.error?.message || error.message);
@@ -161,13 +149,27 @@ class SpotifyService {
       
       // Cache null result สำหรับ client errors เท่านั้น
       if (error.response?.status >= 400 && error.response?.status < 500 && error.response?.status !== 429) {
-        this.searchCache.set(cacheKey, {
-          data: null,
-          timestamp: Date.now()
-        });
+         try {
+           await this.saveToCache(cacheKey, null, 24 * 60 * 60 * 1000); // 1 day fallback
+         } catch (e) { /* ignore write error */ }
       }
       
       return null;
+    }
+  }
+
+  async saveToCache(key, data, ttl) {
+    try {
+      await Cache.findOneAndUpdate(
+        { key },
+        { 
+          data, 
+          expiresAt: new Date(Date.now() + ttl) 
+        },
+        { upsert: true, new: true }
+      );
+    } catch (err) {
+      console.error('⚠️ Cache write error:', err.message);
     }
   }
 
@@ -372,23 +374,28 @@ class SpotifyService {
   }
 
   // ล้าง cache
-  clearCache() {
-    this.searchCache.clear();
-    console.log('🗑️ Spotify cache cleared');
+  async clearCache() {
+    try {
+      await Cache.deleteMany({ key: /^spotify:/ });
+      console.log('🗑️ Spotify cache cleared (DB)');
+    } catch (err) {
+      console.error('❌ Failed to clear Spotify cache:', err.message);
+    }
   }
 
   // ดู cache statistics
-  getCacheStats() {
-    const size = this.searchCache.size;
-    const keys = Array.from(this.searchCache.keys());
-    
-    return {
-      size,
-      cacheTimeout: this.cacheTimeout,
-      sampleKeys: keys.slice(0, 5),
-      isConfigured: this.isConfigured(),
-      hasValidToken: !!(this.accessToken && this.tokenExpiresAt && Date.now() < this.tokenExpiresAt)
-    };
+  async getCacheStats() {
+    try {
+      const count = await Cache.countDocuments({ key: /^spotify:/ });
+      return {
+        size: count,
+        type: 'mongodb',
+        isConfigured: this.isConfigured(),
+        hasValidToken: !!(this.accessToken && this.tokenExpiresAt && Date.now() < this.tokenExpiresAt)
+      };
+    } catch (err) {
+      return { error: err.message };
+    }
   }
 }
 

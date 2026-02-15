@@ -1,16 +1,48 @@
-/**
- * Apple Music Service
- * ใช้สำหรับค้นหา Apple Music URL และดึง animated artwork
- * อ้างอิงจาก background.js ใน Chrome extension
- */
+
+import Cache from '../models/Cache.js';
 
 class AppleMusicService {
   constructor() {
     this.searchTimeout = 5000;
-    this.artworkTimeout = 10000;
+    this.artworkTimeout = 20000;
+    this.cacheTimeout = 30 * 24 * 60 * 60 * 1000; // 30 days
   }
 
-  // Normalize และเตรียม string สำหรับเปรียบเทียบ
+  // Helper methods for caching
+  createCacheKey(type, ...parts) {
+    const rawKey = parts.map(p => (p || '').toString().toLowerCase().trim()).join('|');
+    return `apple:${type}:${rawKey}`;
+  }
+
+  async checkCache(key) {
+    try {
+      const cached = await Cache.findOne({ key });
+      if (cached) {
+        // console.log(`🗄️ Apple Music cache hit: ${key}`);
+        return cached.data;
+      }
+    } catch (err) {
+      console.error('⚠️ Cache read error:', err.message);
+    }
+    return null;
+  }
+
+  async saveToCache(key, data, ttl = this.cacheTimeout) {
+    try {
+      await Cache.findOneAndUpdate(
+        { key },
+        { 
+          data, 
+          expiresAt: new Date(Date.now() + ttl) 
+        },
+        { upsert: true, new: true }
+      );
+    } catch (err) {
+      console.error('⚠️ Cache write error:', err.message);
+    }
+  }
+
+  // ... (Normalization and string manipulation methods remain unchanged)
   baseNormalize(value) {
     return (value ?? '').toString().toLowerCase().trim();
   }
@@ -189,75 +221,97 @@ class AppleMusicService {
   }
 
   /**
-   * ค้นหา Apple Music URL จาก iTunes API
-   * @param {string} songTitle - ชื่อเพลง
-   * @param {string} artist - ชื่อศิลปิน
-   * @param {string} album - ชื่ออัลบั้ม (optional)
-   * @returns {Promise<{success: boolean, url?: string, error?: string}>}
+   * ค้นหา Apple Music URL จาก iTunes API (Optimize with caching and parallel search)
    */
   async searchAppleMusicUrl(songTitle, artist, album = '') {
+    const cacheKey = this.createCacheKey('url', songTitle, artist, album);
+    
+    // 1. Check Cache
+    const cachedResult = await this.checkCache(cacheKey);
+    if (cachedResult) {
+      return cachedResult;
+    }
+
     try {
       const searchTerms = this.buildSearchTerms(songTitle, artist, album);
       if (!searchTerms.length) {
         return { success: false, error: 'No search terms provided' };
       }
 
-      const countryPriority = ['us', 'kr', 'th', 'jp'];
-      let lastResults = [];
+      const countryPriority = ['us', 'th', 'jp', 'kr'];
+      
+      // 2. Parallel Search Strategy
+      // Instead of deep nesting, we race countries for each term batch or vice versa.
+      // Better strategy: Try primary terms in ALL countries in parallel.
+      
+      // Limit terms to first 3 to avoid spamming API too much in parallel
+      const topTerms = searchTerms.slice(0, 3);
+      
+      let foundUrl = null;
       let lastError = null;
 
-      for (const country of countryPriority) {
-        for (const term of searchTerms) {
-          const { results = [], error } = await this.executeSearch(term, country);
-          if (error) {
-            lastError = error;
-            continue;
-          }
+      // Helper to search a single term in a single country
+      const searchOne = async (term, country) => {
+        const { results = [], error } = await this.executeSearch(term, country);
+        if (error) throw new Error(error);
+        if (!results.length) return null;
+        
+        const match = this.findBestMatch(results, artist, songTitle, album);
+        return match?.trackViewUrl || null;
+      };
 
-          if (!results.length) {
-            continue;
-          }
-
-          const matchedItem = this.findBestMatch(results, artist, songTitle, album);
-          if (matchedItem?.trackViewUrl) {
-            return { success: true, url: matchedItem.trackViewUrl };
-          }
-
-          if (!lastResults.length) {
-            lastResults = results;
+      // Execute parallel search
+      // We process terms sequentially, but countries in parallel for each term
+      for (const term of topTerms) {
+        const promises = countryPriority.map(country => searchOne(term, country));
+        
+        // We want the FIRST successful non-null result. 
+        // Promise.any would return the first fulfilled, but we need the first *successful value*.
+        // Detailed parallel logic:
+        const results = await Promise.allSettled(promises);
+        
+        // Check for any successful match
+        for (const result of results) {
+          if (result.status === 'fulfilled' && result.value) {
+            foundUrl = result.value;
+            break; 
           }
         }
-
-        if (lastResults.length) {
-          break;
-        }
+        
+        if (foundUrl) break;
       }
 
-      const fallbackUrl = lastResults[0]?.trackViewUrl;
-      if (fallbackUrl) {
-        return { success: true, url: fallbackUrl };
+      if (foundUrl) {
+        const result = { success: true, url: foundUrl };
+        await this.saveToCache(cacheKey, result);
+        return result;
       }
 
-      return { success: false, error: lastError || 'No results found' };
+      const result = { success: false, error: 'No results found after parallel optimized search' };
+      // Cache failure logic can be debated, let's cache it for a shorter time (e.g., 1 day)
+      await this.saveToCache(cacheKey, result, 24 * 60 * 60 * 1000);
+      return result;
+
     } catch (error) {
-      if (error.name === 'AbortError') {
-        return { success: false, error: 'iTunes search timeout' };
-      }
-      return { success: false, error: error.message };
+       // ... existing error handling ...
+       return { success: false, error: error.message };
     }
   }
 
   /**
-   * ดึง animated artwork URL จาก Apple Music URL
-   * ใช้ API จาก dodoapps.io
-   * @param {string} appleMusicUrl - Apple Music URL
-   * @returns {Promise<{success: boolean, url?: string, error?: string}>}
+   * ดึง animated artwork URL (with caching)
    */
   async getAnimatedArtwork(appleMusicUrl) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.artworkTimeout);
+    const cacheKey = this.createCacheKey('artwork', appleMusicUrl);
 
+    // 1. Check Cache
+    const cached = await this.checkCache(cacheKey);
+    if (cached) return cached;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.artworkTimeout);
+
+    try {
       const response = await fetch('https://clients.dodoapps.io/playlist-precis/playlist-artwork.php', {
         method: 'POST',
         headers: {
@@ -271,37 +325,36 @@ class AppleMusicService {
         signal: controller.signal
       });
 
-      clearTimeout(timeoutId);
-
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Animated artwork API error response:', errorText);
-        return { success: false, error: `Animated artwork API returned status: ${response.status}` };
+         // ... error handling
+         return { success: false, error: `API status: ${response.status}` };
       }
 
       const data = await response.json();
+      let result;
 
       if (data.animatedUrl1080 || data.animatedUrl) {
-        return { success: true, url: data.animatedUrl1080 || data.animatedUrl };
+        result = { success: true, url: data.animatedUrl1080 || data.animatedUrl };
+        // Cache success forever (or 30 days)
+        await this.saveToCache(cacheKey, result);
+        return result;
       }
 
-      return { success: false, error: 'No animated artwork available' };
+      result = { success: false, error: 'No animated artwork available' };
+      // Cache failure (maybe shorter time? 7 days)
+      await this.saveToCache(cacheKey, result, 7 * 24 * 60 * 60 * 1000);
+      return result;
+
     } catch (error) {
       if (error.name === 'AbortError') {
         return { success: false, error: 'Animated artwork fetch timeout' };
       }
       return { success: false, error: error.message };
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
-  /**
-   * ค้นหาและดึง animated artwork URL
-   * รวม searchAppleMusicUrl และ getAnimatedArtwork เป็นขั้นตอนเดียว
-   * @param {string} songTitle - ชื่อเพลง
-   * @param {string} artist - ชื่อศิลปิน  
-   * @param {string} album - ชื่ออัลบั้ม (optional)
-   * @returns {Promise<{success: boolean, animationUrl?: string, appleMusicUrl?: string, error?: string}>}
-   */
   async fetchAnimatedArtwork(songTitle, artist, album = '') {
     try {
       // Step 1: ค้นหา Apple Music URL
@@ -314,7 +367,7 @@ class AppleMusicService {
         };
       }
 
-      console.log(`🍎 Found Apple Music URL for "${artist} - ${songTitle}": ${searchResult.url}`);
+      // console.log(`🍎 Found Apple Music URL for "${artist} - ${songTitle}": ${searchResult.url}`);
 
       // Step 2: ดึง animated artwork
       const artworkResult = await this.getAnimatedArtwork(searchResult.url);

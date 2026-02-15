@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <title>ListenBrainz Import UI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f172a;
+        --surface: rgba(30, 41, 59, 0.85);
+        --surface-alt: rgba(15, 23, 42, 0.7);
+        --border: rgba(148, 163, 184, 0.3);
+        --accent: #38bdf8;
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --danger: #fb7185;
+        --success: #34d399;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+        background: linear-gradient(135deg, var(--bg), #020617);
+        color: var(--text);
+        padding: 2.5rem 1.5rem 4rem;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        padding: 2.5rem 2rem 3rem;
+        backdrop-filter: blur(24px);
+        box-shadow: 0 40px 60px -24px rgba(15, 23, 42, 0.65);
+      }
+      header h1 {
+        margin: 0;
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      header p {
+        margin: 0.5rem 0 0;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      section {
+        margin-top: 2rem;
+      }
+      label {
+        display: inline-block;
+        margin-bottom: 0.75rem;
+        font-weight: 600;
+        color: #bae6fd;
+        letter-spacing: 0.01em;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+      }
+      textarea {
+        width: 100%;
+        min-height: 260px;
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        padding: 1rem 1.25rem;
+        resize: vertical;
+        background: var(--surface-alt);
+        color: var(--text);
+        font-family: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', monospace;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+      textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+        margin-top: 1rem;
+      }
+      .btn {
+        position: relative;
+        border: none;
+        border-radius: 999px;
+        padding: 0.75rem 1.5rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.65;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #0f172a;
+        box-shadow: 0 12px 30px -12px rgba(56, 189, 248, 0.6);
+      }
+      .btn-primary:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 15px 35px -12px rgba(56, 189, 248, 0.75);
+      }
+      .btn-secondary {
+        background: rgba(148, 163, 184, 0.12);
+        color: var(--text);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        transform: translateY(-2px);
+        border-color: rgba(148, 163, 184, 0.35);
+      }
+      input[type="file"] {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin-top: 0.5rem;
+      }
+      .stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin: 1.5rem 0;
+      }
+      .stat-card {
+        flex: 1 1 180px;
+        background: rgba(15, 23, 42, 0.55);
+        border: 1px solid rgba(56, 189, 248, 0.15);
+        border-radius: 20px;
+        padding: 1.25rem;
+      }
+      .stat-card h3 {
+        margin: 0 0 0.25rem;
+        font-size: 2rem;
+      }
+      .stat-card span {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .alert {
+        margin-top: 1.5rem;
+        padding: 1rem 1.25rem;
+        border-radius: 16px;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        background: rgba(15, 23, 42, 0.55);
+      }
+      .alert.success {
+        border-color: rgba(52, 211, 153, 0.45);
+        color: var(--success);
+      }
+      .alert.error {
+        border-color: rgba(251, 113, 133, 0.45);
+        color: var(--danger);
+      }
+      .result-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1.5rem;
+        border-radius: 18px;
+        overflow: hidden;
+      }
+      .result-table thead {
+        background: rgba(56, 189, 248, 0.1);
+      }
+      .result-table th, .result-table td {
+        padding: 0.85rem 1rem;
+        text-align: left;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+      }
+      .result-table tbody tr:hover {
+        background: rgba(56, 189, 248, 0.05);
+      }
+      pre {
+        margin: 0.75rem 0 0;
+        padding: 0.75rem 1rem;
+        border-radius: 12px;
+        background: rgba(15, 23, 42, 0.7);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        color: var(--muted);
+        overflow-x: auto;
+      }
+      footer {
+        margin-top: 3rem;
+        text-align: center;
+        color: rgba(148, 163, 184, 0.6);
+        font-size: 0.85rem;
+      }
+      @media (max-width: 720px) {
+        main {
+          padding: 1.75rem 1.25rem 2.25rem;
+        }
+        header h1 {
+          font-size: 1.65rem;
+        }
+        .controls {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .controls .btn, .controls input[type="file"] {
+          width: 100%;
+          justify-content: center;
+        }
+        textarea {
+          min-height: 200px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>นำเข้าข้อมูลจาก ListenBrainz</h1>
+        <p>รองรับ JSON ปกติหรือ JSON Lines ที่ได้จาก ListenBrainz / Last.fm importer – ระบบจะเรียกใช้ webhook parser เดิมทุกขั้นตอน</p>
+      </header>
+
+      <section>
+        <form id="import-form">
+          <label for="payload">วางข้อมูล JSON หรือ JSON Lines</label>
+          <textarea id="payload" name="payload" placeholder='{"inserted_at": ..., "listened_at": ..., "track_metadata": {...}}'></textarea>
+          <div class="hint" id="entry-count">จำนวนเอนทรี: 0</div>
+
+          <div class="controls">
+            <button type="submit" class="btn btn-primary" id="import-btn">🚀 นำเข้า</button>
+            <button type="button" class="btn btn-secondary" id="sample-btn">เติมตัวอย่าง</button>
+            <label class="btn btn-secondary" for="file-input">📁 เลือกไฟล์</label>
+            <input type="file" id="file-input" accept=".json,.jsonl,.txt" style="display:none" />
+            <button type="button" class="btn btn-secondary" id="clear-btn">ล้างข้อมูล</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="status-block" style="display:none;">
+        <div class="stats">
+          <div class="stat-card">
+            <h3 id="stat-total">0</h3>
+            <span>รับเข้ามาทั้งหมด</span>
+          </div>
+          <div class="stat-card">
+            <h3 id="stat-created">0</h3>
+            <span>สร้างใหม่</span>
+          </div>
+          <div class="stat-card">
+            <h3 id="stat-updated">0</h3>
+            <span>อัปเดต</span>
+          </div>
+          <div class="stat-card">
+            <h3 id="stat-skipped">0</h3>
+            <span>ข้าม/ซ้ำ</span>
+          </div>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <div id="errors-container" style="display:none;">
+          <h3>รายการที่ผิดพลาด</h3>
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>ตำแหน่ง</th>
+                <th>รายละเอียด</th>
+              </tr>
+            </thead>
+            <tbody id="error-rows"></tbody>
+          </table>
+        </div>
+
+        <div id="items-container" style="display:none;">
+          <h3>ตัวอย่างรายการล่าสุด</h3>
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>สถานะ</th>
+                <th>ศิลปิน - เพลง</th>
+                <th>อัลบั้ม</th>
+                <th>เวลา</th>
+              </tr>
+            </thead>
+            <tbody id="item-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer>
+        ListenBrainz Import UI · ข้อมูลทั้งหมดจะถูกประมวลผลผ่านเส้นทาง /api/import/listenbrainz
+      </footer>
+    </main>
+
+    <script>
+      const textarea = document.getElementById('payload');
+      const fileInput = document.getElementById('file-input');
+      const form = document.getElementById('import-form');
+      const importBtn = document.getElementById('import-btn');
+      const statusBlock = document.getElementById('status-block');
+      const entryCount = document.getElementById('entry-count');
+      const alertContainer = document.getElementById('alert-container');
+      const errorContainer = document.getElementById('errors-container');
+      const errorRows = document.getElementById('error-rows');
+      const itemsContainer = document.getElementById('items-container');
+      const itemRows = document.getElementById('item-rows');
+      const statTotal = document.getElementById('stat-total');
+      const statCreated = document.getElementById('stat-created');
+      const statUpdated = document.getElementById('stat-updated');
+      const statSkipped = document.getElementById('stat-skipped');
+
+      const samplePayload = '{\\n  "inserted_at": 1759922716.660063,\\n  "listened_at": 1733035913,\\n  "track_metadata": {\\n    "track_name": "Supernova Love",\\n    "artist_name": "IVE & David Guetta",\\n    "mbid_mapping": {\\n      "caa_id": 40393843035,\\n      "artists": [\\n        {\\n          "artist_mbid": "b2f2216a-d7a9-4ce0-8b8f-f494d9a8c196",\\n          "join_phrase": " & ",\\n          "artist_credit_name": "IVE"\\n        },\\n        {\\n          "artist_mbid": "302bd7b9-d012-4360-897a-93b00c855680",\\n          "join_phrase": "",\\n          "artist_credit_name": "David Guetta"\\n        }\\n      ],\\n      "artist_mbids": [\\n        "b2f2216a-d7a9-4ce0-8b8f-f494d9a8c196",\\n        "302bd7b9-d012-4360-897a-93b00c855680"\\n      ],\\n      "release_mbid": "d7a8fdca-a620-4517-819b-79b0ba4671ab",\\n      "recording_mbid": "f28e2528-210a-44c6-96e0-031d5c29cf85",\\n      "recording_name": "Supernova Love",\\n      "caa_release_mbid": "1097924e-b972-471e-927f-cb2e443387e4"\\n    },\\n    "release_name": "Supernova Love",\\n    "recording_msid": "60ce36d4-d91e-4e42-95da-c0574b1f3405",\\n    "additional_info": {\\n      "lastfm_track_mbid": "f28e2528-210a-44c6-96e0-031d5c29cf85",\\n      "submission_client": "ListenBrainz lastfm importer v2"\\n    }\\n  }\\n}\\n';
+
+      function countEntries(text) {
+        const trimmed = text.trim();
+        if (!trimmed) return 0;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) return parsed.length;
+          if (parsed && typeof parsed === 'object') return 1;
+        } catch (err) {
+          const lines = trimmed.split(/\\r?\\n/).map((line) => line.trim()).filter(Boolean);
+          return lines.length;
+        }
+        return 0;
+      }
+
+      function setLoading(isLoading) {
+        importBtn.disabled = isLoading;
+        importBtn.textContent = isLoading ? '⏳ กำลังนำเข้า...' : '🚀 นำเข้า';
+      }
+
+      function resetOutput() {
+        alertContainer.innerHTML = '';
+        errorContainer.style.display = 'none';
+        errorRows.innerHTML = '';
+        itemsContainer.style.display = 'none';
+        itemRows.innerHTML = '';
+      }
+
+      function renderAlert(type, message) {
+        alertContainer.innerHTML = '<div class="alert ' + type + '">' + message + '</div>';
+      }
+
+      function appendErrorRow(index, source, message) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td>' + index + '</td><td>' + source + '</td><td>' + message + '</td>';
+        errorRows.appendChild(row);
+      }
+
+      function appendItemRow(status, track) {
+        const row = document.createElement('tr');
+        const displayStatus = status === 'created' ? '🆕 สร้างใหม่' : status === 'updated' ? '🔄 อัปเดต' : '⏭️ ข้าม';
+        const timestamp = track.timestamp ? new Date(track.timestamp).toLocaleString() : '-';
+        row.innerHTML = '<td>' + displayStatus + '</td><td>' + (track.artist || '-') + ' - ' + (track.title || '-') + '</td><td>' + (track.album || '-') + '</td><td>' + timestamp + '</td>';
+        itemRows.appendChild(row);
+      }
+
+      textarea.addEventListener('input', () => {
+        entryCount.textContent = 'จำนวนเอนทรี: ' + countEntries(textarea.value);
+      });
+
+      document.getElementById('sample-btn').addEventListener('click', () => {
+        textarea.value = samplePayload.trim();
+        entryCount.textContent = 'จำนวนเอนทรี: ' + countEntries(textarea.value);
+      });
+
+      document.getElementById('clear-btn').addEventListener('click', () => {
+        textarea.value = '';
+        entryCount.textContent = 'จำนวนเอนทรี: 0';
+        statusBlock.style.display = 'none';
+        resetOutput();
+      });
+
+      fileInput.addEventListener('change', (event) => {
+        const [file] = event.target.files;
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          textarea.value = reader.result;
+          entryCount.textContent = 'จำนวนเอนทรี: ' + countEntries(textarea.value);
+        };
+        reader.readAsText(file, 'utf-8');
+      });
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const raw = textarea.value.trim();
+        if (!raw) {
+          renderAlert('error', 'กรุณาวางข้อมูล JSON หรือ JSON Lines ก่อน');
+          statusBlock.style.display = 'block';
+          return;
+        }
+
+        setLoading(true);
+        resetOutput();
+
+        try {
+          const response = await fetch('/api/import/listenbrainz', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ raw })
+          });
+
+          const result = await response.json();
+          statusBlock.style.display = 'block';
+
+          statTotal.textContent = result.total ?? 0;
+          statCreated.textContent = result.created ?? 0;
+          statUpdated.textContent = result.updated ?? 0;
+          statSkipped.textContent = (result.skipped ?? 0) + (result.ignored ?? 0);
+
+          if (result.success) {
+            renderAlert('success', result.message || 'นำเข้าข้อมูลสำเร็จ');
+          } else {
+            renderAlert('error', result.message || 'นำเข้าบางส่วนสำเร็จ แต่มีข้อผิดพลาด');
+          }
+
+          if (Array.isArray(result.errors) && result.errors.length > 0) {
+            errorContainer.style.display = '';
+            result.errors.forEach((err, idx) => {
+              appendErrorRow(idx + 1, err.source || '-', err.message || 'ไม่ทราบสาเหตุ');
+            });
+          }
+
+          const previewItems = [];
+          if (result.items) {
+            ['created', 'updated', 'skipped'].forEach((key) => {
+              if (Array.isArray(result.items[key])) {
+                result.items[key].slice(0, 10).forEach((item) => previewItems.push({ status: key, ...item }));
+              }
+            });
+          }
+
+          if (previewItems.length > 0) {
+            itemsContainer.style.display = '';
+            previewItems.forEach((item) => appendItemRow(item.status, item));
+          }
+        } catch (error) {
+          statusBlock.style.display = 'block';
+          renderAlert('error', error?.message || 'เกิดข้อผิดพลาดระหว่างส่งข้อมูล');
+        } finally {
+          setLoading(false);
+        }
+      });
+    </script>
+  </body>
+</html>

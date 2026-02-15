@@ -1,0 +1,838 @@
+{
+  "info": {
+    "_postman_id": "music-webhook-api-v1",
+    "name": "Music Webhook API",
+    "description": "ชุด API endpoint สำหรับสำรวจและจัดการข้อมูลการฟังเพลงใน MongoDB\n\nทุก endpoint รองรับ `Accept: application/json` และได้รับการคุ้มครองด้วย middleware (rate limit, logging)\n\n## พารามิเตอร์ร่วม\n- `range` - เลือกหน้าต่างเวลา: `week`, `month`, `year`, `all-time`\n- `offset` - เลื่อนช่วงเวลาเป็นจำนวนหน้าต่างก่อนหน้า\n- `tz` - กำหนด timezone (เช่น `Asia/Bangkok`)\n- `recentLimit` - จำนวนรายการล่าสุดที่ต้องการดึงมา",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & System",
+      "description": "ตรวจสอบสถานะระบบ",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            },
+            "description": "ตรวจสอบสถานะระบบ รวมถึงการเชื่อมต่อ database และ memory usage"
+          },
+          "response": [
+            {
+              "name": "Health Check - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"ok\",\n  \"timestamp\": \"2025-01-31T10:00:00.000Z\",\n  \"uptime\": 86400,\n  \"database\": {\n    \"connected\": true,\n    \"responseTime\": 15\n  },\n  \"memory\": {\n    \"used\": 256,\n    \"total\": 512\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "API Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api",
+              "host": ["{{baseUrl}}"],
+              "path": ["api"]
+            },
+            "description": "ดึงข้อมูล API version และรายการ endpoints ทั้งหมด"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Statistics & Overview",
+      "description": "ดูสถิติภาพรวมการฟังเพลง",
+      "item": [
+        {
+          "name": "Get Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/stats?range=week&offset=0&recentLimit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stats"],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "week",
+                  "description": "ช่วงเวลา: week, month, year, all-time"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "เลื่อนช่วงเวลา (0 = ปัจจุบัน, 1 = ช่วงก่อนหน้า)"
+                },
+                {
+                  "key": "recentLimit",
+                  "value": "10",
+                  "description": "จำนวนรายการล่าสุด (default: 10)"
+                },
+                {
+                  "key": "tz",
+                  "value": "Asia/Bangkok",
+                  "description": "Timezone",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "ดึงสถิติรวมของการฟังเพลงในช่วงเวลาที่กำหนด\n\nสรุปรวมจำนวนเพลง/ศิลปิน/เพลย์ ระยะเวลาฟังเฉลี่ย, connector ยอดนิยม, รายการล่าสุด พร้อมสถิติ Spotify"
+          },
+          "response": [
+            {
+              "name": "Get Stats - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"range\": {\n    \"range\": \"week\",\n    \"offset\": 0,\n    \"start\": \"2025-01-01T00:00:00.000Z\",\n    \"end\": \"2025-01-08T00:00:00.000Z\"\n  },\n  \"totals\": {\n    \"totalPlays\": 420,\n    \"uniqueTracks\": 310,\n    \"uniqueArtists\": 120,\n    \"totalDurationSeconds\": 54210,\n    \"averageDurationSeconds\": 180\n  },\n  \"connectors\": [{\"connector\": \"youtube\", \"plays\": 160}],\n  \"topArtists\": [{\"artist\": \"IVE\", \"plays\": 30}],\n  \"recentScrobbles\": [{\"artist\": \"David Guetta\", \"title\": \"Supernova Love\"}],\n  \"spotify\": {\"configured\": true, \"enrichment_rate\": 82}\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Tracks Management",
+      "description": "จัดการและค้นหาเพลง",
+      "item": [
+        {
+          "name": "Get Tracks (with pagination)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tracks?page=1&limit=50&sortBy=scrobbledAt&order=desc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tracks"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "เลขหน้า (default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "จำนวนต่อหน้า (default: 50, max: 100)"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "scrobbledAt",
+                  "description": "เรียงตาม: scrobbledAt, artist, title"
+                },
+                {
+                  "key": "order",
+                  "value": "desc",
+                  "description": "ลำดับ: asc หรือ desc"
+                },
+                {
+                  "key": "search",
+                  "value": "IVE",
+                  "description": "ค้นหาจากชื่อเพลง, ศิลปิน, หรืออัลบั้ม",
+                  "disabled": true
+                },
+                {
+                  "key": "range",
+                  "value": "week",
+                  "description": "กรองตามช่วงเวลา",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "ดึงรายการเพลงทั้งหมดพร้อม pagination, sorting และ search"
+          },
+          "response": [
+            {
+              "name": "Get Tracks - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"tracks\": [],\n  \"pagination\": {\n    \"currentPage\": 1,\n    \"totalPages\": 10,\n    \"totalItems\": 500,\n    \"itemsPerPage\": 50\n  },\n  \"meta\": {\n    \"sortBy\": \"scrobbledAt\",\n    \"order\": \"desc\",\n    \"search\": null\n  },\n  \"range\": {\n    \"start\": \"...\",\n    \"end\": \"...\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Track Loved Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"507f1f77bcf86cd799439011\",\n  \"isLoved\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/tracks",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tracks"]
+            },
+            "description": "อัปเดตสถานะ \"Loved\" ของเพลง"
+          },
+          "response": [
+            {
+              "name": "Update Loved - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"track\": {\n    \"_id\": \"507f1f77bcf86cd799439011\",\n    \"artist\": \"IVE\",\n    \"title\": \"HEYA\",\n    \"isLoved\": true\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Tracks by Date Range",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tracks/range?startDate=2025-01-01&endDate=2025-01-07",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tracks", "range"],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "2025-01-01",
+                  "description": "วันเริ่มต้น (ISO 8601 format)"
+                },
+                {
+                  "key": "endDate",
+                  "value": "2025-01-07",
+                  "description": "วันสิ้นสุด (ISO 8601 format)"
+                }
+              ]
+            },
+            "description": "ลบเพลงทั้งหมดในช่วงวันที่ที่กำหนด"
+          },
+          "response": [
+            {
+              "name": "Delete Range - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"deletedCount\": 150,\n  \"dateRange\": {\n    \"start\": \"2025-01-01T00:00:00.000Z\",\n    \"end\": \"2025-01-07T23:59:59.999Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Leaderboards & Rankings",
+      "description": "จัดอันดับศิลปินและเพลงยอดนิยม",
+      "item": [
+        {
+          "name": "Get Top Artists",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tracks/top-artists?range=month&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tracks", "top-artists"],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "month",
+                  "description": "ช่วงเวลา: week, month, year, all-time"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "เลื่อนช่วงเวลา",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "จำนวนศิลปิน (default: 20, max: 100)"
+                },
+                {
+                  "key": "tz",
+                  "value": "Asia/Bangkok",
+                  "description": "Timezone",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "ดึงรายการศิลปินยอดนิยมพร้อม metadata และรูปภาพ"
+          },
+          "response": [
+            {
+              "name": "Top Artists - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"window\": {\n    \"range\": \"month\",\n    \"start\": \"2025-01-01T00:00:00.000Z\",\n    \"end\": \"2025-02-01T00:00:00.000Z\"\n  },\n  \"items\": [\n    {\n      \"artist\": \"NewJeans\",\n      \"plays\": 58,\n      \"latestTrack\": {\n        \"title\": \"How Sweet\",\n        \"album\": \"How Sweet\",\n        \"scrobbledAt\": \"2025-01-31T08:15:00.000Z\",\n        \"trackArtUrl\": \"https://...\"\n      },\n      \"artistImage\": \"https://...\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Top Tracks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tracks/top-tracks?range=week&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tracks", "top-tracks"],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "week",
+                  "description": "ช่วงเวลา: week, month, year, all-time"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "เลื่อนช่วงเวลา",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "จำนวนเพลง (default: 20, max: 100)"
+                },
+                {
+                  "key": "tz",
+                  "value": "Asia/Bangkok",
+                  "description": "Timezone",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "จัดอันดับเพลงยอดนิยมพร้อม metadata (track art/animation)"
+          },
+          "response": [
+            {
+              "name": "Top Tracks - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"window\": {\"range\": \"week\", \"start\": \"...\", \"end\": \"...\"},\n  \"items\": [\n    {\n      \"artist\": \"IVE\",\n      \"title\": \"HEYA\",\n      \"plays\": 42,\n      \"metadata\": {\n        \"album\": \"IVE SWITCH\",\n        \"trackArtUrl\": \"https://...\",\n        \"trackAnimationUrl\": \"https://...\",\n        \"duration\": 180\n      },\n      \"lastPlayed\": \"2025-01-31T20:00:00.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Detailed Analytics",
+      "description": "วิเคราะห์ข้อมูลเชิงลึก",
+      "item": [
+        {
+          "name": "Get Track Analytics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/track?artist=IVE&title=HEYA&recentLimit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "track"],
+              "query": [
+                {
+                  "key": "artist",
+                  "value": "IVE",
+                  "description": "ชื่อศิลปิน (required)"
+                },
+                {
+                  "key": "title",
+                  "value": "HEYA",
+                  "description": "ชื่อเพลง (required)"
+                },
+                {
+                  "key": "recentLimit",
+                  "value": "20",
+                  "description": "จำนวน scrobbles ล่าสุดที่จะดึง (default: 20)"
+                },
+                {
+                  "key": "tz",
+                  "value": "Asia/Bangkok",
+                  "description": "Timezone",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "วิเคราะห์เชิงลึกสำหรับเพลงเดียว\n\nข้อมูลที่ได้รับ:\n- Summary: จำนวน scrobbles, loved count, first/last play\n- Time Distribution: การกระจายตามชั่วโมง, วัน, เดือน\n- Breakdown: แยกตาม connector, source\n- Recent Scrobbles: รายการล่าสุด\n- Spotify Metadata"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Album Analytics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/albums?artist=IVE&album=IVE SWITCH&recentLimit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "albums"],
+              "query": [
+                {
+                  "key": "artist",
+                  "value": "IVE",
+                  "description": "ชื่อศิลปิน (required)"
+                },
+                {
+                  "key": "album",
+                  "value": "IVE SWITCH",
+                  "description": "ชื่ออัลบั้ม (required)"
+                },
+                {
+                  "key": "recentLimit",
+                  "value": "20",
+                  "description": "จำนวน scrobbles ล่าสุด"
+                },
+                {
+                  "key": "tz",
+                  "value": "Asia/Bangkok",
+                  "description": "Timezone",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "วิเคราะห์ข้อมูลอัลบั้มเฉพาะ\n\nข้อมูลที่ได้รับ:\n- Summary: จำนวนครั้งที่เล่น, first/last play\n- Track List: รายชื่อเพลงในอัลบั้ม\n- Connector Breakdown\n- Timeline: กราฟรายวัน 30 วันย้อนหลัง\n- Album Art"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Artist Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/artists/NewJeans?limit=10&recentLimit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "artists", "NewJeans"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "จำนวน top tracks/albums (default: 10)"
+                },
+                {
+                  "key": "recentLimit",
+                  "value": "20",
+                  "description": "จำนวน scrobbles ล่าสุด (default: 20)"
+                },
+                {
+                  "key": "tz",
+                  "value": "Asia/Bangkok",
+                  "description": "Timezone",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "โปรไฟล์ศิลปินแบบละเอียด\n\nPath Parameter: name - ชื่อศิลปิน (URI encoded)\n\nข้อมูลที่ได้รับ:\n- Summary: total plays, unique tracks, unique albums\n- Top Tracks & Albums\n- 30-day play history\n- Artist Image"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Now Playing",
+      "description": "จัดการสถานะกำลังเล่นปัจจุบัน",
+      "item": [
+        {
+          "name": "Get Now Playing Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/nowplaying",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "nowplaying"]
+            },
+            "description": "ดึงข้อมูลสถานะกำลังเล่นปัจจุบัน (in-memory)\n\nUse Case: สำหรับแสดงผล \"Now Playing\" widget แบบ real-time"
+          },
+          "response": [
+            {
+              "name": "Now Playing - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"isPlaying\": true,\n  \"track\": {\n    \"artist\": \"IVE\",\n    \"title\": \"HEYA\",\n    \"album\": \"IVE SWITCH\",\n    \"trackArtUrl\": \"https://...\",\n    \"trackAnimationUrl\": \"https://...\",\n    \"duration\": 180\n  },\n  \"playback\": {\n    \"startedAt\": \"2025-01-31T10:00:00.000Z\",\n    \"currentPosition\": 45,\n    \"connector\": \"youtube\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Set Now Playing Status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"playing\",\n  \"track\": {\n    \"artist\": \"IVE\",\n    \"title\": \"HEYA\",\n    \"album\": \"IVE SWITCH\",\n    \"connector\": \"youtube\"\n  },\n  \"currentTime\": 45,\n  \"duration\": 180\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/nowplaying/playing",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "nowplaying", "playing"]
+            },
+            "description": "อัปเดตสถานะกำลังเล่นปัจจุบัน (manual refresh)\n\nstatus values: playing, paused, stopped"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Webhook Endpoints",
+      "description": "รับข้อมูล scrobble จาก external services",
+      "item": [
+        {
+          "name": "Submit Scrobble",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "User-Agent",
+                "value": "web-scrobbler"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"artist\": \"IVE\",\n  \"title\": \"HEYA\",\n  \"album\": \"IVE SWITCH\",\n  \"timestamp\": \"2025-01-31T10:00:00Z\",\n  \"duration\": 180,\n  \"connector\": \"youtube\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/scrobble",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "scrobble"]
+            },
+            "description": "รับข้อมูล scrobble จาก external services\n\nรองรับหลายรูปแบบ:\n- Web Scrobbler format\n- ListenBrainz format\n- Custom format"
+          },
+          "response": [
+            {
+              "name": "Scrobble - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Scrobble recorded successfully\",\n  \"track\": {\n    \"_id\": \"...\",\n    \"artist\": \"IVE\",\n    \"title\": \"HEYA\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Submit Scrobble (Web Scrobbler Format)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "User-Agent",
+                "value": "Mozilla/5.0 web-scrobbler/2.x"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventName\": \"scrobble\",\n  \"time\": 1706692800000,\n  \"data\": {\n    \"song\": {\n      \"parsed\": {\n        \"track\": \"HEYA\",\n        \"artist\": \"IVE\",\n        \"album\": \"IVE SWITCH\",\n        \"duration\": 180,\n        \"originUrl\": \"https://www.youtube.com/watch?v=xxx\"\n      },\n      \"connector\": {\n        \"id\": \"youtube\",\n        \"label\": \"YouTube\"\n      },\n      \"metadata\": {\n        \"trackArtUrl\": \"https://i.ytimg.com/vi/xxx/hqdefault.jpg\"\n      }\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/scrobble",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "scrobble"]
+            },
+            "description": "Submit scrobble ในรูปแบบ Web Scrobbler extension"
+          },
+          "response": []
+        },
+        {
+          "name": "Submit Scrobble (Generic Webhook)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"artist\": \"IVE\",\n  \"title\": \"HEYA\",\n  \"album\": \"IVE SWITCH\",\n  \"timestamp\": \"2025-01-31T10:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook"]
+            },
+            "description": "Generic webhook endpoint (alias ของ /webhook/scrobble)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Import & Migration",
+      "description": "นำเข้าข้อมูลจากแหล่งอื่น",
+      "item": [
+        {
+          "name": "Import ListenBrainz Data",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"inserted_at\": 1706692800,\n    \"listened_at\": 1706692800,\n    \"track_metadata\": {\n      \"artist_name\": \"IVE\",\n      \"track_name\": \"HEYA\",\n      \"release_name\": \"IVE SWITCH\",\n      \"additional_info\": {\n        \"duration_ms\": 180000\n      }\n    }\n  }\n]"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/import/listenbrainz",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "import", "listenbrainz"]
+            },
+            "description": "นำเข้าข้อมูล scrobbles จาก ListenBrainz export\n\nรองรับ:\n- JSON array\n- JSON Lines format\n- multipart/form-data file upload"
+          },
+          "response": [
+            {
+              "name": "Import - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"imported\": 1500,\n  \"skipped\": 10,\n  \"errors\": [],\n  \"summary\": {\n    \"totalProcessed\": 1510,\n    \"duplicates\": 10,\n    \"newTracks\": 1500\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "ListenBrainz Import UI (HTML)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/import/listenbrainz",
+              "host": ["{{baseUrl}}"],
+              "path": ["import", "listenbrainz"]
+            },
+            "description": "หน้าเว็บ UI สำหรับนำเข้าข้อมูลจาก ListenBrainz\n\nResponse: HTML page พร้อมฟอร์มอัพโหลด"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Duplicates Management",
+      "description": "จัดการเพลงที่ซ้ำกัน",
+      "item": [
+        {
+          "name": "Get Duplicate Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/duplicates?limit=50&threshold=300",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "duplicates"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "จำนวนรายการ duplicate groups (default: 50)"
+                },
+                {
+                  "key": "threshold",
+                  "value": "300",
+                  "description": "เวลาที่ใกล้กันถือว่าซ้ำ (วินาที, default: 300)"
+                }
+              ]
+            },
+            "description": "ดึงสถิติและรายการเพลงที่ซ้ำกัน"
+          },
+          "response": [
+            {
+              "name": "Duplicates - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"totalDuplicates\": 45,\n  \"duplicateGroups\": [\n    {\n      \"artist\": \"IVE\",\n      \"title\": \"HEYA\",\n      \"instances\": [\n        {\n          \"_id\": \"...\",\n          \"scrobbledAt\": \"2025-01-31T10:00:00.000Z\",\n          \"connector\": \"youtube\"\n        },\n        {\n          \"_id\": \"...\",\n          \"scrobbledAt\": \"2025-01-31T10:02:00.000Z\",\n          \"connector\": \"spotify\"\n        }\n      ],\n      \"count\": 2\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Remove Duplicates",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/duplicates?threshold=300&dryRun=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "duplicates"],
+              "query": [
+                {
+                  "key": "threshold",
+                  "value": "300",
+                  "description": "เวลาที่ใกล้กันถือว่าซ้ำ (วินาที, default: 300)"
+                },
+                {
+                  "key": "dryRun",
+                  "value": "true",
+                  "description": "ทดสอบโดยไม่ลบจริง (true/false)"
+                }
+              ]
+            },
+            "description": "ลบเพลงที่ซ้ำกัน (เก็บเฉพาะรายการแรก)"
+          },
+          "response": [
+            {
+              "name": "Remove Duplicates - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"duplicatesFound\": 45,\n  \"duplicatesRemoved\": 45,\n  \"duplicateGroups\": [],\n  \"message\": \"Successfully removed 45 duplicate tracks\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Spotify Integration",
+      "description": "เชื่อมต่อและ enrich ข้อมูลจาก Spotify",
+      "item": [
+        {
+          "name": "Get Spotify Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/spotify/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "spotify", "status"]
+            },
+            "description": "ตรวจสอบสถานะการเชื่อมต่อ Spotify"
+          },
+          "response": [
+            {
+              "name": "Spotify Status - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"configured\": true,\n  \"hasCredentials\": true,\n  \"clientIdSet\": true,\n  \"clientSecretSet\": true,\n  \"tokenStatus\": \"valid\",\n  \"lastRefreshed\": \"2025-01-31T09:00:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Spotify Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/spotify/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "spotify", "stats"]
+            },
+            "description": "สถิติการ enrich ข้อมูลจาก Spotify"
+          },
+          "response": [
+            {
+              "name": "Spotify Stats - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"total\": 5000,\n  \"enriched\": 4100,\n  \"notEnriched\": 900,\n  \"enrichmentRate\": 82,\n  \"lastEnrichment\": \"2025-01-31T08:00:00.000Z\",\n  \"breakdown\": {\n    \"hasSpotifyId\": 4100,\n    \"hasAlbumArt\": 4050,\n    \"hasPreviewUrl\": 3800\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Enrich Tracks with Spotify",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/spotify/enrich?limit=100&batchSize=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "spotify", "enrich"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "description": "จำนวนเพลงที่จะ enrich (default: 100)"
+                },
+                {
+                  "key": "batchSize",
+                  "value": "50",
+                  "description": "ขนาด batch (default: 50)"
+                }
+              ]
+            },
+            "description": "Enrich เพลงทั้งหมดด้วยข้อมูล Spotify"
+          },
+          "response": [
+            {
+              "name": "Enrich - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"processed\": 100,\n  \"enriched\": 92,\n  \"failed\": 8,\n  \"progress\": {\n    \"total\": 5000,\n    \"completed\": 4192\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Missing Spotify Data",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/spotify/update-missing?limit=100&force=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "spotify", "update-missing"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "description": "จำนวนเพลงที่จะอัปเดต"
+                },
+                {
+                  "key": "force",
+                  "value": "false",
+                  "description": "บังคับอัปเดตแม้มีข้อมูลอยู่แล้ว (true/false)"
+                }
+              ]
+            },
+            "description": "อัปเดตข้อมูล Spotify ที่ขาดหายไปในเพลงที่มีอยู่"
+          },
+          "response": [
+            {
+              "name": "Update Missing - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"totalProcessed\": 150,\n  \"updated\": 145,\n  \"skipped\": 5,\n  \"errors\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "Clear Spotify Cache",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/spotify/cache",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "spotify", "cache"]
+            },
+            "description": "ล้าง cache ของ Spotify service"
+          },
+          "response": [
+            {
+              "name": "Clear Cache - Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Spotify cache cleared successfully\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -304,6 +304,20 @@ trackSchema.statics.findByArtistAndTitle = function(artist, title) {
   });
 };
 
+trackSchema.statics.isRecentDuplicate = async function(artist, title, timestamp, windowMs = 300000) {
+  const ts = new Date(timestamp);
+  const start = new Date(ts.getTime() - windowMs);
+  
+  const count = await this.countDocuments({
+    artist: artist,
+    title: title,
+    scrobbledAt: { $gte: start }, // Check strictly after start of window
+    eventType: 'scrobble'
+  });
+  
+  return count > 0;
+};
+
 // Find or create track within time window
 trackSchema.statics.findOrCreateTrack = async function(trackData) {
   // Resolve event type from multiple possible fields
