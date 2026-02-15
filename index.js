@@ -234,16 +234,16 @@ class MusicWebhookServer {
       await Database.connect();
 
       // Start the server
-      const server = this.app.listen(PORT, HOST, () => {
-        console.log(`🚀 Music Webhook Server running at http://${HOST}:${PORT}`);
+      const server = this.app.listen(PORT, () => {
+        console.log(`🚀 Music Webhook Server running at PORT :${PORT}`);
         console.log(`📋 Available endpoints:`);
-        console.log(`   POST http://${HOST}:${PORT}/webhook/scrobble - Receive scrobble data`);
-        console.log(`   GET  http://${HOST}:${PORT}/api/stats - Get statistics`);
-        console.log(`   GET  http://${HOST}:${PORT}/api/tracks - Get recent tracks`);
-        console.log(`   GET  http://${HOST}:${PORT}/api/nowplaying - Get now playing status`);
-        console.log(`   POST http://${HOST}:${PORT}/api/nowplaying/playing - Update now playing status`);
-        console.log(`   GET  http://${HOST}:${PORT}/api/health - Health check`);
-        console.log(`   GET  http://${HOST}:${PORT}/ - API documentation`);
+        console.log(`   POST /webhook/scrobble - Receive scrobble data`);
+        console.log(`   GET  /api/stats - Get statistics`);
+        console.log(`   GET  /api/tracks - Get recent tracks`);
+        console.log(`   GET  /api/nowplaying - Get now playing status`);
+        console.log(`   POST /api/nowplaying/playing - Update now playing status`);
+        console.log(`   GET  /api/health - Health check`);
+        console.log(`   GET  / - API documentation`);
         console.log('');
         console.log('🎵 Ready to receive scrobble data from web-scrobbler!');
         console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
