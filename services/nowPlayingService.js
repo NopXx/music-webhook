@@ -1,29 +1,39 @@
-// Simple in-memory Now Playing state manager
+// Optimized in-memory Now Playing state manager
 
 class NowPlayingService {
   constructor() {
     this.current = null; // { track, status, startedAt, lastUpdate, progress }
+    this._cachedStatus = null;
+    this._cachedAt = 0;
   }
 
   // Normalize minimal track info from webhook trackData
   buildTrackInfo(trackData) {
+    // Guard: if trackData is nullish, use empty object
+    const d = trackData || {};
     return {
-      title: trackData.title || trackData?.song?.processed?.track || trackData?.song?.parsed?.track || '',
-      artist: trackData.artist || trackData?.song?.processed?.artist || trackData?.song?.parsed?.artist || '',
-      album: trackData.album || trackData?.song?.processed?.album || trackData?.song?.parsed?.album || '',
-      duration: trackData.duration || trackData?.song?.processed?.duration || trackData?.song?.parsed?.duration || null,
-      connector: trackData.connector || trackData?.song?.connector?.label || trackData?.song?.connector?.id || '',
-      originalUrl: trackData.originalUrl || trackData?.song?.parsed?.originUrl || '',
-      trackArtUrl: trackData.trackArtUrl || trackData?.song?.metadata?.trackArtUrl || null,
-      artistUrl: trackData.artistUrl || trackData?.song?.metadata?.artistUrl || null,
-      trackUrl: trackData.trackUrl || trackData?.song?.metadata?.trackUrl || null,
-      albumUrl: trackData.albumUrl || trackData?.song?.metadata?.albumUrl || null,
-      animationUrl: trackData.animationUrl || trackData?.song?.metadata?.animationUrl || null,
-      masterTallUrl: trackData.masterTallUrl || trackData?.song?.metadata?.masterTallUrl || null,
-      isLovedInService: trackData.isLovedInService || trackData?.song?.metadata?.userloved || false,
+      title: d.title || d?.song?.processed?.track || d?.song?.parsed?.track || '',
+      artist: d.artist || d?.song?.processed?.artist || d?.song?.parsed?.artist || '',
+      album: d.album || d?.song?.processed?.album || d?.song?.parsed?.album || '',
+      duration: d.duration || d?.song?.processed?.duration || d?.song?.parsed?.duration || null,
+      connector: d.connector || d?.song?.connector?.label || d?.song?.connector?.id || '',
+      originalUrl: d.originalUrl || d?.song?.parsed?.originUrl || '',
+      trackArtUrl: d.trackArtUrl || d?.song?.metadata?.trackArtUrl || null,
+      artistUrl: d.artistUrl || d?.song?.metadata?.artistUrl || null,
+      trackUrl: d.trackUrl || d?.song?.metadata?.trackUrl || null,
+      albumUrl: d.albumUrl || d?.song?.metadata?.albumUrl || null,
+      animationUrl: d.animationUrl || d?.song?.metadata?.animationUrl || null,
+      masterTallUrl: d.masterTallUrl || d?.song?.metadata?.masterTallUrl || null,
+      isLovedInService: d.isLovedInService || d?.song?.metadata?.userloved || false,
       // pass through spotify summary if available on trackData
-      spotify: trackData.spotify || null,
+      spotify: d.spotify || null,
     };
+  }
+
+  /** Invalidate the 1-second response cache whenever state changes */
+  _invalidateCache() {
+    this._cachedStatus = null;
+    this._cachedAt = 0;
   }
 
   setPlaying(trackData) {
@@ -48,33 +58,39 @@ class NowPlayingService {
       progressSeconds: progress,
       source: trackData.source || 'web-scrobbler',
     };
+    this._invalidateCache();
   }
 
   setPaused(trackData) {
+    // Guard: allow calling without arguments (from playerController)
+    const d = trackData || {};
     const now = new Date();
-    const progress = typeof trackData.currentTime === 'number' ? trackData.currentTime : (this.current?.progressSeconds ?? null);
+    const progress = typeof d.currentTime === 'number' ? d.currentTime : (this.current?.progressSeconds ?? null);
     this.current = {
       status: 'paused',
-      track: this.buildTrackInfo(trackData),
+      track: trackData ? this.buildTrackInfo(trackData) : (this.current?.track || this.buildTrackInfo({})),
       startedAt: this.current?.startedAt || now,
       lastUpdate: now,
       progressSeconds: progress,
-      source: trackData.source || 'web-scrobbler',
+      source: d.source || this.current?.source || 'web-scrobbler',
     };
+    this._invalidateCache();
   }
 
   setStopped(trackData) {
+    // Guard: allow calling without arguments (from playerController)
+    const d = trackData || {};
     const now = new Date();
-    // retain last track but mark stopped
-    const track = this.buildTrackInfo(trackData);
+    const track = trackData ? this.buildTrackInfo(trackData) : (this.current?.track || this.buildTrackInfo({}));
     this.current = {
       status: 'stopped',
       track,
       startedAt: this.current?.startedAt || now,
       lastUpdate: now,
       progressSeconds: this.current?.progressSeconds ?? null,
-      source: trackData.source || 'web-scrobbler',
+      source: d.source || this.current?.source || 'web-scrobbler',
     };
+    this._invalidateCache();
   }
 
   // Refresh current state as playing, optionally with new progress/duration
@@ -82,7 +98,6 @@ class NowPlayingService {
     const now = new Date();
     if (!this.current || !this.current.track) return;
 
-    // Ensure status is playing
     this.current.status = 'playing';
     this.current.lastUpdate = now;
 
@@ -91,22 +106,19 @@ class NowPlayingService {
     }
 
     if (typeof currentTime === 'number' && currentTime >= 0) {
-      // If we have a startedAt, keep it; otherwise infer from currentTime
       if (!this.current.startedAt) {
         this.current.startedAt = new Date(now.getTime() - currentTime * 1000);
       }
       this.current.progressSeconds = currentTime;
-    } else {
-      // If we are resuming from paused and we had a saved progress, reset startedAt
-      if (this.current.status === 'playing' && typeof this.current.progressSeconds === 'number') {
-        // If we were paused previously, startedAt might be too old. Realign.
-        this.current.startedAt = new Date(now.getTime() - this.current.progressSeconds * 1000);
-      }
-      // Fallback: recompute progress from startedAt if available
+    } else if (typeof this.current.progressSeconds === 'number') {
+      // Realign startedAt based on saved progress
+      this.current.startedAt = new Date(now.getTime() - this.current.progressSeconds * 1000);
+      // Recompute progress from startedAt
       if (this.current.startedAt) {
         this.current.progressSeconds = Math.floor((now - this.current.startedAt) / 1000);
       }
     }
+    this._invalidateCache();
   }
 
   // Force set playing with provided track data
@@ -127,42 +139,47 @@ class NowPlayingService {
     }
   }
 
-  // Compute live status with expiry heuristics
+  /**
+   * Compute live status with expiry heuristics.
+   * Uses a 1-second response cache to avoid recomputing on every poll.
+   */
   getStatus() {
-    if (!this.current) {
-      return { playing: false, status: 'unknown', updatedAt: null, track: null };
+    // Return cached status if computed within the last second
+    const nowMs = Date.now();
+    if (this._cachedStatus && (nowMs - this._cachedAt) < 1000) {
+      return this._cachedStatus;
     }
 
-    const now = new Date();
+    if (!this.current) {
+      const result = { playing: false, status: 'unknown', updatedAt: null, track: null };
+      this._cachedStatus = result;
+      this._cachedAt = nowMs;
+      return result;
+    }
+
+    const now = new Date(nowMs);
     const { status, track, startedAt, lastUpdate, progressSeconds } = this.current;
 
-    // Determine if stale. If playing and duration known, consider done after duration + 15s
+    // Determine if stale
     let playing = status === 'playing';
-    let elapsed = null;
-    if (startedAt) {
-      elapsed = Math.floor((now - startedAt) / 1000);
-    }
+    const elapsed = startedAt ? Math.floor((now - startedAt) / 1000) : null;
 
     if (playing) {
       if (track.duration && elapsed != null) {
-        // Recalculate strictly by elapsed > duration
         if (elapsed > track.duration) {
           playing = false;
         }
-      } else {
+      } else if (now - lastUpdate > 10 * 60 * 1000) {
         // No duration; expire after 10 minutes since last update
-        if (now - lastUpdate > 10 * 60 * 1000) {
-          playing = false;
-        }
+        playing = false;
       }
     }
 
-    // Compute dynamic progress
+    // Compute dynamic progress (simplified)
     let progress = null;
     if (playing) {
       if (typeof progressSeconds === 'number') {
-        const delta = Math.floor((now - lastUpdate) / 1000);
-        progress = progressSeconds + delta;
+        progress = progressSeconds + Math.floor((now - lastUpdate) / 1000);
       } else if (elapsed != null) {
         progress = elapsed;
       }
@@ -172,18 +189,14 @@ class NowPlayingService {
     } else if (status === 'paused') {
       progress = typeof progressSeconds === 'number' ? progressSeconds : elapsed;
     } else {
-      // stopped or unknown
-      if (track.duration) {
-        const base = (elapsed != null ? elapsed : (typeof progressSeconds === 'number' ? progressSeconds : track.duration));
-        progress = Math.min(base, track.duration);
-      } else {
-        progress = typeof progressSeconds === 'number' ? progressSeconds : (elapsed != null ? elapsed : null);
-      }
+      // stopped or unknown — clamp to duration if available
+      const base = typeof progressSeconds === 'number' ? progressSeconds : elapsed;
+      progress = track.duration && base != null ? Math.min(base, track.duration) : base;
     }
 
-    return {
+    const result = {
       playing,
-      status: playing ? 'playing' : status === 'paused' ? 'paused' : 'stopped',
+      status: playing ? 'playing' : (status === 'paused' ? 'paused' : 'stopped'),
       updatedAt: lastUpdate,
       startedAt,
       elapsed,
@@ -191,6 +204,10 @@ class NowPlayingService {
       track,
       source: this.current.source,
     };
+
+    this._cachedStatus = result;
+    this._cachedAt = nowMs;
+    return result;
   }
 }
 

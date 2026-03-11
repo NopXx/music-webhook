@@ -2,6 +2,7 @@ import Track from '../models/Track.js';
 import scrobbleService from '../services/scrobbleService.js';
 import nowPlayingService from '../services/nowPlayingService.js';
 import spotifyService from '../services/spotifyService.js';
+import appleMusicService from '../services/appleMusicService.js';
 import { normalizeListenBrainzEntry } from '../middleware/validation.js';
 import { updateLovedTrackStatus } from '../services/analyticsService.js';
 import path from 'path';
@@ -21,7 +22,26 @@ class ScrobbleController {
       const trackData = scrobbleService.parseScrobbleData(req.body, req, validatedTrack);
       
       if (trackData.eventType === 'nowplaying') {
-        const npStatus = nowPlayingService.setPlaying(trackData);
+        nowPlayingService.setPlaying(trackData);
+
+        // Background: enrich with Apple Music animated artwork (fire-and-forget)
+        if (trackData.title && trackData.artist) {
+          appleMusicService.fetchAnimatedArtwork(trackData.title, trackData.artist, trackData.album || '')
+            .then(result => {
+              if (result.success && result.animationUrl && nowPlayingService.current?.track) {
+                nowPlayingService.current.track.animationUrl = result.animationUrl;
+                if (result.appleMusicUrl) {
+                  nowPlayingService.current.track.appleMusicUrl = result.appleMusicUrl;
+                }
+                nowPlayingService._invalidateCache();
+              }
+            })
+            .catch(err => {
+              console.error('❌ Background NP artwork enrichment failed:', err.message);
+            });
+        }
+
+        const npStatus = nowPlayingService.getStatus();
         return res.status(200).json({
           success: true,
           message: 'Now playing updated',
