@@ -236,6 +236,32 @@ export const mergeMetadata = (target = {}, source = {}) => {
 };
 
 // ──────────────────────────────────────────────
+// Name Cleaning (Normalization)
+// ──────────────────────────────────────────────
+
+/**
+ * Clean album name suffixes like '- EP', '(Single)', '(Deluxe Version)', etc.
+ * This ensures that variants log under the same canonical album name pattern.
+ *
+ * @param {string} name - The album name (usually already lowercase).
+ * @returns {string} - The cleaned album name.
+ */
+export const cleanAlbumName = (name) => {
+  if (!name || typeof name !== 'string') return '';
+  let cleaned = name.trim();
+  
+  // RegExp to match common suffixes at the end of the string.
+  // Case-insensitive ('i' flag)
+  const regex = /(?:\s*-\s*ep|\s*\(\s*ep\s*\)|\s*-\s*single|\s*\(\s*single\s*\)|\s*-\s*the\s*[\d\w]+\s*mini\s*album|\s*\(deluxe\s*version\)|\s*\[deluxe\s*version\]|\s*\(deluxe\)|\s*\[deluxe\]|\s*\(original\s*motion\s*picture\s*soundtrack\)|\s*\(original\s*soundtrack\)|\s*-\s*original\s*soundtrack|\s*\(feat\..*?\)|\s*\(ft\..*?\))$/i;
+  
+  // Apply regex replacement
+  const stripped = cleaned.replace(regex, '');
+  
+  // Return stripped value, or if it stripped everything (weird edge case), return original
+  return stripped.trim() || cleaned;
+};
+
+// ──────────────────────────────────────────────
 // Track Field Normalization (pre-save)
 // ──────────────────────────────────────────────
 

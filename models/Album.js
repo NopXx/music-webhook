@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { cleanAlbumName } from '../utils/trackNormalizer.js';
 
 const albumSchema = new mongoose.Schema({
   name: {
@@ -54,7 +55,7 @@ albumSchema.statics.findOrCreateByNameAndArtist = async function (name, artistId
   }
 
   const trimmed = name.trim();
-  const lower = trimmed.toLowerCase();
+  const lower = cleanAlbumName(trimmed.toLowerCase());
 
   let album = await this.findOne({ nameLower: lower, artist: artistId });
   if (album) {

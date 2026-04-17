@@ -5,7 +5,7 @@ import TrackMeta from '../models/TrackMeta.js';
 import mongoose from 'mongoose';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { buildNormalizedTrackData } from '../utils/trackNormalizer.js';
+import { buildNormalizedTrackData, cleanAlbumName } from '../utils/trackNormalizer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -458,7 +458,7 @@ class SystemController {
 
     const getOrCreateAlbum = async (name, artistId, extra = {}) => {
       if (!name?.trim() || !artistId) return null;
-      const lower = name.trim().toLowerCase();
+      const lower = cleanAlbumName(name.trim().toLowerCase());
       const key = `${lower}|${artistId}`;
       if (albumCache.has(key)) return albumCache.get(key);
       if (isDryRun) {
