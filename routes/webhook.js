@@ -38,6 +38,11 @@ const WebhookRoutes = {
   getDuplicateStats: systemController.getDuplicateStats.bind(systemController),
   deleteTracksByDateRange: systemController.deleteTracksByDateRange.bind(systemController),
   handleRoot: systemController.handleRoot.bind(systemController),
+
+  // Migration
+  renderMigratePage: systemController.renderMigratePage.bind(systemController),
+  migrationPrecheck: systemController.migrationPrecheck.bind(systemController),
+  runMigration: systemController.runMigration.bind(systemController),
 };
 
 export default WebhookRoutes;

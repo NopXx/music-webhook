@@ -1,4 +1,7 @@
-import Track from '../models/Track.js';
+import Scrobble from '../models/Scrobble.js';
+import TrackMeta from '../models/TrackMeta.js';
+import Artist from '../models/Artist.js';
+import Album from '../models/Album.js';
 import { resolveArtistImage } from './artistImageService.js';
 
 const RANGE_CONFIG = {
@@ -199,6 +202,58 @@ const normalizeSourceDocs = (docs = []) => {
     }));
 };
 
+// ──────────────────────────────────────────────
+// Common $lookup stages to hydrate Scrobble docs
+// ──────────────────────────────────────────────
+
+const HYDRATE_PIPELINE = [
+  {
+    $lookup: {
+      from: 'trackmetas',
+      localField: 'track',
+      foreignField: '_id',
+      as: 'trackInfo'
+    }
+  },
+  { $unwind: '$trackInfo' },
+  {
+    $lookup: {
+      from: 'artists',
+      localField: 'trackInfo.artist',
+      foreignField: '_id',
+      as: 'artistInfo'
+    }
+  },
+  { $unwind: '$artistInfo' },
+  {
+    $lookup: {
+      from: 'albums',
+      localField: 'trackInfo.album',
+      foreignField: '_id',
+      as: 'albumInfo'
+    }
+  },
+  {
+    $unwind: {
+      path: '$albumInfo',
+      preserveNullAndEmptyArrays: true
+    }
+  },
+  {
+    $addFields: {
+      artist: '$artistInfo.name',
+      title: '$trackInfo.title',
+      album: { $ifNull: ['$albumInfo.name', ''] },
+      duration: '$trackInfo.duration',
+      trackArtUrl: '$trackInfo.trackArtUrl',
+      animationUrl: '$trackInfo.animationUrl',
+      albumUrl: { $ifNull: ['$albumInfo.albumUrl', ''] },
+      appleMusicUrl: '$trackInfo.appleMusicUrl',
+      spotify_enriched: '$trackInfo.spotify_enriched',
+    }
+  }
+];
+
 const buildRecentProjection = () => ({
   title: 1,
   artist: 1,
@@ -215,6 +270,10 @@ const buildRecentProjection = () => ({
   spotify_enriched: 1
 });
 
+// ──────────────────────────────────────────────
+// Stats Overview
+// ──────────────────────────────────────────────
+
 export const getStatsOverview = async ({
   range = 'all-time',
   offset = 0,
@@ -229,6 +288,7 @@ export const getStatsOverview = async ({
 
   const pipeline = [
     { $match: baseMatch },
+    ...HYDRATE_PIPELINE,
     {
       $facet: {
         plays: [
@@ -259,30 +319,16 @@ export const getStatsOverview = async ({
         ],
         uniqueTracks: [
           {
-            $match: {
-              artist: { $exists: true, $ne: null },
-              title: { $exists: true, $ne: null }
-            }
-          },
-          {
             $group: {
-              _id: {
-                artist: { $toLower: '$artist' },
-                title: { $toLower: '$title' }
-              }
+              _id: '$track'
             }
           },
           { $count: 'count' }
         ],
         uniqueArtists: [
           {
-            $match: {
-              artist: { $exists: true, $ne: null }
-            }
-          },
-          {
             $group: {
-              _id: { $toLower: '$artist' }
+              _id: '$trackInfo.artist'
             }
           },
           { $count: 'count' }
@@ -308,15 +354,10 @@ export const getStatsOverview = async ({
           { $project: buildRecentProjection() }
         ],
         topArtists: [
-          {
-            $match: {
-              artist: { $exists: true, $ne: null }
-            }
-          },
           { $sort: { scrobbledAt: -1 } },
           {
             $group: {
-              _id: { $toLower: '$artist' },
+              _id: '$trackInfo.artist',
               artist: { $first: '$artist' },
               plays: { $sum: 1 },
               lastScrobble: { $first: '$scrobbledAt' }
@@ -329,7 +370,7 @@ export const getStatsOverview = async ({
     }
   ];
 
-  const [result] = await Track.aggregate(pipeline);
+  const [result] = await Scrobble.aggregate(pipeline);
   const overview = result?.plays?.[0] || {};
   const totals = {
     totalPlays: overview.totalPlays || 0,
@@ -343,10 +384,10 @@ export const getStatsOverview = async ({
     totals,
     connectors: normalizeConnectorDocs(result?.connectors),
     recent: result?.recent || [],
-    topArtists: (result?.topArtists || []).map((artist) => ({
-      artist: artist.artist,
-      plays: artist.plays,
-      lastScrobbledAt: artist.lastScrobble
+    topArtists: (result?.topArtists || []).map((a) => ({
+      artist: a.artist,
+      plays: a.plays,
+      lastScrobbledAt: a.lastScrobble
     })),
     window: {
       ...window,
@@ -355,6 +396,10 @@ export const getStatsOverview = async ({
     }
   };
 };
+
+// ──────────────────────────────────────────────
+// Tracks Listing (paginated)
+// ──────────────────────────────────────────────
 
 export const getTracksListing = async ({
   page,
@@ -378,47 +423,59 @@ export const getTracksListing = async ({
 
   const { match: rangeMatch, window } = buildRangeMatch(range, rangeOffset);
 
-  const query = {
+  const scrobbleMatch = {
     eventType: 'scrobble',
     ...(rangeMatch || {})
   };
+  if (connector) scrobbleMatch.connector = connector;
+  if (source) scrobbleMatch.source = source;
 
-  if (connector) {
-    query.connector = connector;
-  }
-  if (source) {
-    query.source = source;
-  }
+  // Build aggregation pipeline
+  const pipeline = [
+    { $match: scrobbleMatch },
+    ...HYDRATE_PIPELINE,
+  ];
 
+  // If there is a search query, filter after hydration
   if (search && typeof search === 'string') {
     const keywords = search.trim();
     if (keywords.length > 0) {
       const regex = new RegExp(keywords.replace(/\s+/g, '.*'), 'i');
-      query.$or = [
-        { title: regex },
-        { artist: regex },
-        { album: regex }
-      ];
+      pipeline.push({
+        $match: {
+          $or: [
+            { title: regex },
+            { artist: regex },
+            { album: regex }
+          ]
+        }
+      });
     }
   }
 
-  const total = await Track.countDocuments(query);
-  const tracks = await Track.find(query)
-    .sort({ [sanitizedSortField]: sanitizedOrder })
-    .skip(skip)
-    .limit(sanitizedLimit)
-    .lean();
+  // Count total after filtering
+  const countPipeline = [...pipeline, { $count: 'total' }];
+  const [countResult] = await Scrobble.aggregate(countPipeline);
+  const total = countResult?.total || 0;
 
-  // คำนวณ userPlayCount สำหรับแต่ละ track
+  // Retrieve page
+  pipeline.push(
+    { $sort: { [sanitizedSortField]: sanitizedOrder } },
+    { $skip: skip },
+    { $limit: sanitizedLimit }
+  );
+
+  const tracks = await Scrobble.aggregate(pipeline);
+
+  // Calculate userPlayCount per track
   const tracksWithPlayCount = await Promise.all(
-    tracks.map(async (track) => {
-      const playCount = await Track.countDocuments({
+    tracks.map(async (scrobble) => {
+      const playCount = await Scrobble.countDocuments({
         eventType: 'scrobble',
-        artist: { $regex: new RegExp(`^${track.artist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-        title: { $regex: new RegExp(`^${track.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+        track: scrobble.track
       });
       return {
-        ...track,
+        ...scrobble,
         userPlayCount: playCount
       };
     })
@@ -457,6 +514,10 @@ export const getTracksListing = async ({
   };
 };
 
+// ──────────────────────────────────────────────
+// Update Loved Status
+// ──────────────────────────────────────────────
+
 export const updateLovedTrackStatus = async ({ id, isLoved }) => {
   if (!id) {
     throw new Error('Track id is required');
@@ -465,18 +526,22 @@ export const updateLovedTrackStatus = async ({ id, isLoved }) => {
     throw new Error('isLoved must be a boolean value');
   }
 
-  const track = await Track.findByIdAndUpdate(
+  const scrobble = await Scrobble.findByIdAndUpdate(
     id,
     { $set: { isLoved } },
     { new: true }
   );
 
-  if (!track) {
+  if (!scrobble) {
     throw new Error('Track not found');
   }
 
-  return track;
+  return scrobble;
 };
+
+// ──────────────────────────────────────────────
+// Top Artists Leaderboard
+// ──────────────────────────────────────────────
 
 export const getTopArtistsLeaderboard = async ({
   range = 'all-time',
@@ -492,16 +557,11 @@ export const getTopArtistsLeaderboard = async ({
 
   const pipeline = [
     { $match: baseMatch },
-    {
-      $match: {
-        artist: { $exists: true, $ne: null },
-        title: { $exists: true, $ne: null }
-      }
-    },
+    ...HYDRATE_PIPELINE,
     { $sort: { scrobbledAt: -1 } },
     {
       $group: {
-        _id: { $toLower: '$artist' },
+        _id: '$trackInfo.artist',
         artist: { $first: '$artist' },
         plays: { $sum: 1 },
         lastTrack: {
@@ -521,7 +581,7 @@ export const getTopArtistsLeaderboard = async ({
     { $limit: sanitizedLimit }
   ];
 
-  const results = await Track.aggregate(pipeline);
+  const results = await Scrobble.aggregate(pipeline);
 
   return {
     window: {
@@ -538,6 +598,10 @@ export const getTopArtistsLeaderboard = async ({
   };
 };
 
+// ──────────────────────────────────────────────
+// Top Tracks Leaderboard
+// ──────────────────────────────────────────────
+
 export const getTopTracksLeaderboard = async ({
   range = 'all-time',
   offset = 0,
@@ -552,19 +616,11 @@ export const getTopTracksLeaderboard = async ({
 
   const pipeline = [
     { $match: baseMatch },
-    {
-      $match: {
-        artist: { $exists: true, $ne: null },
-        title: { $exists: true, $ne: null }
-      }
-    },
+    ...HYDRATE_PIPELINE,
     { $sort: { scrobbledAt: -1 } },
     {
       $group: {
-        _id: {
-          artist: { $toLower: '$artist' },
-          title: { $toLower: '$title' }
-        },
+        _id: '$track',
         artist: { $first: '$artist' },
         title: { $first: '$title' },
         album: { $first: '$album' },
@@ -585,7 +641,7 @@ export const getTopTracksLeaderboard = async ({
     { $limit: sanitizedLimit }
   ];
 
-  const results = await Track.aggregate(pipeline);
+  const results = await Scrobble.aggregate(pipeline);
 
   return {
     window: {
@@ -607,6 +663,10 @@ export const getTopTracksLeaderboard = async ({
   };
 };
 
+// ──────────────────────────────────────────────
+// Track Insights (single track detailed analytics)
+// ──────────────────────────────────────────────
+
 export const getTrackInsights = async ({
   artist,
   title,
@@ -617,15 +677,25 @@ export const getTrackInsights = async ({
     throw new Error('artist and title are required');
   }
 
+  const tz = ensureTimezone(timezone);
+
+  // Find the Artist + TrackMeta first
   const artistRegex = buildExactRegex(artist.trim());
   const titleRegex = buildExactRegex(title.trim());
-  const tz = ensureTimezone(timezone);
-  const targetTitleLower = title.trim().toLowerCase();
+
+  const artistDoc = await Artist.findOne({ nameLower: artist.trim().toLowerCase() });
+  if (!artistDoc) return null;
+
+  const trackMeta = await TrackMeta.findOne({
+    artist: artistDoc._id,
+    titleLower: title.trim().toLowerCase()
+  }).populate('album');
+
+  if (!trackMeta) return null;
 
   const baseMatch = {
     eventType: 'scrobble',
-    artist: artistRegex,
-    title: titleRegex
+    track: trackMeta._id
   };
 
   const pipeline = [
@@ -647,15 +717,6 @@ export const getTrackInsights = async ({
               lovedInService: {
                 $sum: {
                   $cond: [{ $eq: ['$isLovedInService', true] }, 1, 0]
-                }
-              },
-              avgDuration: {
-                $avg: {
-                  $cond: [
-                    { $and: [{ $ifNull: ['$duration', false] }, { $gt: ['$duration', 0] }] },
-                    '$duration',
-                    null
-                  ]
                 }
               }
             }
@@ -740,40 +801,53 @@ export const getTrackInsights = async ({
         recent: [
           { $sort: { scrobbledAt: -1 } },
           { $limit: safeLimit(recentLimit, 12, 50) },
-          { $project: buildRecentProjection() }
+          {
+            $project: {
+              scrobbledAt: 1,
+              connector: 1,
+              source: 1,
+              metadataLabel: 1,
+              isLoved: 1,
+            }
+          }
         ]
       }
     }
   ];
 
-  const [result] = await Track.aggregate(pipeline);
+  const [result] = await Scrobble.aggregate(pipeline);
   const overview = result?.overview?.[0];
 
   if (!overview || overview.plays === 0) {
     return null;
   }
 
-  const related = await Track.aggregate([
+  // Find related tracks by the same artist (excluding this track)
+  const related = await Scrobble.aggregate([
     {
       $match: {
-        eventType: 'scrobble',
-        artist: artistRegex
+        eventType: 'scrobble'
       }
     },
     {
-      $addFields: {
-        titleLower: { $toLower: '$title' }
+      $lookup: {
+        from: 'trackmetas',
+        localField: 'track',
+        foreignField: '_id',
+        as: 'tm'
       }
     },
+    { $unwind: '$tm' },
     {
       $match: {
-        titleLower: { $ne: targetTitleLower }
+        'tm.artist': artistDoc._id,
+        track: { $ne: trackMeta._id }
       }
     },
     {
       $group: {
-        _id: '$titleLower',
-        title: { $first: '$title' },
+        _id: '$track',
+        title: { $first: '$tm.title' },
         plays: { $sum: 1 },
         lastPlay: { $max: '$scrobbledAt' }
       }
@@ -782,26 +856,32 @@ export const getTrackInsights = async ({
     { $limit: 5 }
   ]);
 
-  const spotifyTrack = await Track.findOne(baseMatch)
-    .sort({ spotify_enriched: -1, scrobbledAt: -1 })
-    .select('spotify spotify_enriched spotify_match_found spotify_search_attempted album trackArtUrl animationUrl albumUrl appleMusicUrl')
-    .lean();
+  // Add recent scrobble info (with artist/title/album for response compatibility)
+  const recentWithMeta = (result?.recent || []).map((r) => ({
+    ...r,
+    title: trackMeta.title,
+    artist: artistDoc.name,
+    album: trackMeta.album?.name || '',
+    trackArtUrl: trackMeta.trackArtUrl,
+    animationUrl: trackMeta.animationUrl,
+    duration: trackMeta.duration,
+  }));
 
   return {
     meta: {
       title: title,
       artist: artist,
-      album: spotifyTrack?.album || null,
-      trackArtUrl: spotifyTrack?.trackArtUrl || null,
-      animationUrl: spotifyTrack?.animationUrl || null,
-      appleMusicUrl: spotifyTrack?.appleMusicUrl || null
+      album: trackMeta.album?.name || null,
+      trackArtUrl: trackMeta.trackArtUrl || null,
+      animationUrl: trackMeta.animationUrl || null,
+      appleMusicUrl: trackMeta.appleMusicUrl || null
     },
     overview: {
       totalScrobbles: overview.plays,
       firstPlay: overview.firstPlay,
       lastPlay: overview.lastPlay,
       lovedCount: overview.loved + overview.lovedInService,
-      averageDurationSeconds: Math.round(overview.avgDuration || 0)
+      averageDurationSeconds: trackMeta.duration ? Math.round(trackMeta.duration) : 0
     },
     distributions: {
       hourly: fillHourlyBuckets(result?.hourly || []),
@@ -817,18 +897,22 @@ export const getTrackInsights = async ({
       userAgent: doc._id,
       plays: doc.plays
     })),
-    recent: result?.recent || [],
+    recent: recentWithMeta,
     relatedTracks: related,
-    spotify: spotifyTrack?.spotify || null,
-    spotifyMeta: spotifyTrack
+    spotify: trackMeta.spotify || null,
+    spotifyMeta: trackMeta.spotify_search_attempted
       ? {
-          enriched: spotifyTrack.spotify_enriched,
-          matchFound: spotifyTrack.spotify_match_found,
-          searchAttempted: spotifyTrack.spotify_search_attempted
+          enriched: trackMeta.spotify_enriched,
+          matchFound: trackMeta.spotify_match_found,
+          searchAttempted: trackMeta.spotify_search_attempted
         }
       : null
   };
 };
+
+// ──────────────────────────────────────────────
+// Album Insights
+// ──────────────────────────────────────────────
 
 export const getAlbumInsights = async ({
   artist,
@@ -840,19 +924,31 @@ export const getAlbumInsights = async ({
     throw new Error('artist and album are required');
   }
 
-  const artistRegex = buildExactRegex(artist.trim());
-  const albumRegex = buildExactRegex(album.trim());
   const tz = ensureTimezone(timezone);
   const timelineStart = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
+  // Look up Artist + Album docs
+  const artistDoc = await Artist.findOne({ nameLower: artist.trim().toLowerCase() });
+  if (!artistDoc) return null;
+
+  const albumDoc = await Album.findOne({
+    nameLower: album.trim().toLowerCase(),
+    artist: artistDoc._id
+  });
+  if (!albumDoc) return null;
+
+  // Find all TrackMeta IDs for this album
+  const trackMetaIds = await TrackMeta.find({ album: albumDoc._id }).distinct('_id');
+  if (trackMetaIds.length === 0) return null;
+
   const baseMatch = {
     eventType: 'scrobble',
-    artist: artistRegex,
-    album: albumRegex
+    track: { $in: trackMetaIds }
   };
 
   const pipeline = [
     { $match: baseMatch },
+    ...HYDRATE_PIPELINE,
     {
       $facet: {
         overview: [
@@ -877,7 +973,7 @@ export const getAlbumInsights = async ({
         tracks: [
           {
             $group: {
-              _id: { $toLower: '$title' },
+              _id: '$track',
               title: { $first: '$title' },
               plays: { $sum: 1 },
               avgDuration: { $avg: '$duration' }
@@ -923,26 +1019,20 @@ export const getAlbumInsights = async ({
     }
   ];
 
-  const [result] = await Track.aggregate(pipeline);
+  const [result] = await Scrobble.aggregate(pipeline);
   const overview = result?.overview?.[0];
 
   if (!overview || overview.plays === 0) {
     return null;
   }
 
-  // ดึงข้อมูล meta จาก track ล่าสุด
-  const latestTrack = await Track.findOne(baseMatch)
-    .sort({ scrobbledAt: -1 })
-    .select('trackArtUrl animationUrl appleMusicUrl')
-    .lean();
-
   return {
     meta: {
       artist: artist,
       album: album,
-      trackArtUrl: latestTrack?.trackArtUrl || result?.recent?.[0]?.trackArtUrl || null,
-      animationUrl: latestTrack?.animationUrl || null,
-      appleMusicUrl: latestTrack?.appleMusicUrl || null
+      trackArtUrl: albumDoc.trackArtUrl || result?.recent?.[0]?.trackArtUrl || null,
+      animationUrl: result?.recent?.[0]?.animationUrl || null,
+      appleMusicUrl: albumDoc.appleMusicUrl || null
     },
     overview: {
       totalScrobbles: overview.plays,
@@ -959,12 +1049,16 @@ export const getAlbumInsights = async ({
     timeline: result?.timeline || [],
     recent: result?.recent || [],
     coverArt:
-      latestTrack?.trackArtUrl ||
+      albumDoc.trackArtUrl ||
       result?.recent?.[0]?.trackArtUrl ||
       result?.recent?.[0]?.albumUrl ||
       null
   };
 };
+
+// ──────────────────────────────────────────────
+// Artist Profile
+// ──────────────────────────────────────────────
 
 export const getArtistProfileData = async ({
   name,
@@ -976,17 +1070,25 @@ export const getArtistProfileData = async ({
     throw new Error('artist name is required');
   }
 
-  const artistRegex = buildExactRegex(name.trim());
   const timezone = ensureTimezone(tz);
   const timelineStart = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
+  // Find the Artist doc
+  const artistDoc = await Artist.findOne({ nameLower: name.trim().toLowerCase() });
+  if (!artistDoc) return null;
+
+  // Find all TrackMeta IDs for this artist
+  const trackMetaIds = await TrackMeta.find({ artist: artistDoc._id }).distinct('_id');
+  if (trackMetaIds.length === 0) return null;
+
   const baseMatch = {
     eventType: 'scrobble',
-    artist: artistRegex
+    track: { $in: trackMetaIds }
   };
 
   const pipeline = [
     { $match: baseMatch },
+    ...HYDRATE_PIPELINE,
     {
       $facet: {
         overview: [
@@ -995,10 +1097,10 @@ export const getArtistProfileData = async ({
               _id: null,
               plays: { $sum: 1 },
               uniqueTracks: {
-                $addToSet: { $toLower: '$title' }
+                $addToSet: '$track'
               },
               uniqueAlbums: {
-                $addToSet: { $toLower: { $ifNull: ['$album', ''] } }
+                $addToSet: '$trackInfo.album'
               },
               firstPlay: { $min: '$scrobbledAt' },
               lastPlay: { $max: '$scrobbledAt' }
@@ -1011,7 +1113,10 @@ export const getArtistProfileData = async ({
               uniqueTracks: { $size: '$uniqueTracks' },
               uniqueAlbums: {
                 $size: {
-                  $setDifference: ['$uniqueAlbums', ['']]
+                  $filter: {
+                    input: '$uniqueAlbums',
+                    cond: { $ne: ['$$this', null] }
+                  }
                 }
               },
               firstPlay: 1,
@@ -1022,7 +1127,7 @@ export const getArtistProfileData = async ({
         topTracks: [
           {
             $group: {
-              _id: { $toLower: '$title' },
+              _id: '$track',
               title: { $first: '$title' },
               album: { $first: '$album' },
               plays: { $sum: 1 },
@@ -1034,11 +1139,11 @@ export const getArtistProfileData = async ({
         ],
         topAlbums: [
           {
-            $match: { album: { $exists: true, $ne: null, $ne: '' } }
+            $match: { 'trackInfo.album': { $ne: null } }
           },
           {
             $group: {
-              _id: { $toLower: '$album' },
+              _id: '$trackInfo.album',
               album: { $first: '$album' },
               plays: { $sum: 1 },
               sampleArt: { $first: '$trackArtUrl' }
@@ -1085,7 +1190,7 @@ export const getArtistProfileData = async ({
     }
   ];
 
-  const [result] = await Track.aggregate(pipeline);
+  const [result] = await Scrobble.aggregate(pipeline);
   const overview = result?.overview?.[0];
 
   if (!overview || overview.totalPlays === 0) {
@@ -1100,10 +1205,10 @@ export const getArtistProfileData = async ({
   return {
     overview,
     topTracks: result?.topTracks || [],
-    topAlbums: (result?.topAlbums || []).map((album) => ({
-      album: album.album,
-      plays: album.plays,
-      art: album.sampleArt || null
+    topAlbums: (result?.topAlbums || []).map((a) => ({
+      album: a.album,
+      plays: a.plays,
+      art: a.sampleArt || null
     })),
     connectors: normalizeConnectorDocs(result?.connectors),
     timeline: {
@@ -1114,4 +1219,3 @@ export const getArtistProfileData = async ({
     artistImage
   };
 };
-

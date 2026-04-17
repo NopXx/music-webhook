@@ -1,6 +1,6 @@
 import spotifyService from '../services/spotifyService.js';
 import scrobbleService from '../services/scrobbleService.js';
-import Track from '../models/Track.js';
+import TrackMeta from '../models/TrackMeta.js';
 
 // Helper for concurrency control
 async function pMap(array, mapper, concurrency = 5) {
@@ -53,7 +53,7 @@ class SpotifyController {
    */
   async getSpotifyStats(req, res) {
     try {
-      const spotifyStats = await Track.getSpotifyStats();
+      const spotifyStats = await TrackMeta.getSpotifyStats();
       const stats = spotifyStats[0] || {
         total: 0,
         spotify_enriched: 0,
@@ -101,11 +101,11 @@ class SpotifyController {
       // Find tracks that need Spotify data
       let tracksToEnrich;
       if (force) {
-        tracksToEnrich = await Track.find({ eventType: 'scrobble' })
-          .sort({ scrobbledAt: -1 })
+        tracksToEnrich = await TrackMeta.find({})
+          .sort({ updatedAt: -1 })
           .limit(limit);
       } else {
-        tracksToEnrich = await Track.findWithoutSpotifyData(limit);
+        tracksToEnrich = await TrackMeta.findWithoutSpotifyData(limit);
       }
       
       if (tracksToEnrich.length === 0) {
@@ -210,10 +210,10 @@ class SpotifyController {
         };
       }
 
-      const tracksToUpdate = await Track.find(query)
-        .sort({ scrobbledAt: -1 })
+      const tracksToUpdate = await TrackMeta.find(query)
+        .sort({ updatedAt: -1 })
         .limit(limit)
-        .select('_id artist title album duration year trackNumber spotify_search_attempted spotify_enriched');
+        .select('_id title artist album duration trackNumber spotify_search_attempted spotify_enriched');
 
       if (tracksToUpdate.length === 0) {
         return res.status(200).json({
@@ -250,7 +250,7 @@ class SpotifyController {
           
           await scrobbleService.enrichWithSpotifyData(track);
           
-          const updatedTrack = await Track.findById(track._id);
+          const updatedTrack = await TrackMeta.findById(track._id);
           
           if (updatedTrack && updatedTrack.spotify_enriched) {
             stats.enriched++;

@@ -8,7 +8,7 @@ import {
   getArtistProfileData
 } from '../services/analyticsService.js';
 import spotifyService from '../services/spotifyService.js';
-import Track from '../models/Track.js';
+import TrackMeta from '../models/TrackMeta.js';
 
 class AnalyticsController {
   
@@ -33,7 +33,7 @@ class AnalyticsController {
       let spotifyStats = null;
       if (spotifyService.isConfigured()) {
         try {
-          const spotifyData = await Track.getSpotifyStats();
+          const spotifyData = await TrackMeta.getSpotifyStats();
           const stats = spotifyData[0] || {
             total: 0,
             spotify_enriched: 0,

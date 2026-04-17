@@ -1,4 +1,5 @@
-import Track from '../models/Track.js';
+import Scrobble from '../models/Scrobble.js';
+import TrackMeta from '../models/TrackMeta.js';
 import scrobbleService from '../services/scrobbleService.js';
 import nowPlayingService from '../services/nowPlayingService.js';
 import spotifyService from '../services/spotifyService.js';
@@ -54,73 +55,50 @@ class ScrobbleController {
         });
       }
 
-      // Handle duplicate scrobbles (within 5 minutes)
-      const isRecentDuplicate = await Track.isRecentDuplicate(
-        trackData.artist,
-        trackData.title,
-        trackData.scrobbledAt || trackData.timestamp,
-        300000 // 5 minutes window
-      );
+      // Use the new normalized pipeline: Artist → Album → TrackMeta → Scrobble
+      const result = await Scrobble.findOrCreateScrobble(trackData);
+      const action = result.action || 'created';
 
-      if (isRecentDuplicate) {
-        console.log(`⚠️ Ignored duplicate scrobble: ${trackData.artist} - ${trackData.title}`);
+      if (action === 'ignored' || action === 'skipped') {
+        console.log(`⏭️ ${action}: ${trackData.artist} - ${trackData.title}`);
         return res.status(200).json({
           success: true,
-          ignored: true,
-          message: 'Duplicate scrobble ignored (within 5 minutes)',
+          action,
+          message: action === 'ignored' ? 'Non-scrobble event ignored' : 'Duplicate scrobble skipped',
           track: {
             title: trackData.title,
-            artist: trackData.artist
+            artist: trackData.artist,
           }
         });
       }
-      
-      const savedTrack = await Track.findOrCreateTrack(trackData);
-      const isNew = savedTrack.isNew;
-      const action = savedTrack.action || (isNew ? 'created' : 'updated');
 
-      console.log(`📝 Scrobble ${action}: ${savedTrack.artist} - ${savedTrack.title} [${savedTrack.connector}]`);
+      const trackMeta = result._trackMeta;
+      console.log(`📝 Scrobble ${action}: ${trackData.artist} - ${trackData.title} [${trackData.connector || ''}]`);
 
-      // Trigger background enrichment (fire and forget)
+      // Trigger background enrichment on TrackMeta (fire and forget)
       
       // 1. Apple Music Animated Artwork
-      const shouldEnrichWithAnimation = 
-        (isNew || !savedTrack.animation_search_attempted) &&
-        !savedTrack.animationUrl &&
-        savedTrack.title && 
-        savedTrack.artist;
-
-      if (shouldEnrichWithAnimation) {
-        // Run in background with a small delay
+      if (trackMeta && !trackMeta.animation_search_attempted && !trackMeta.animationUrl) {
         setTimeout(() => {
-          scrobbleService.enrichWithAnimationData(savedTrack).catch(err => {
-            console.error(`❌ Background animation enrichment failed for ${savedTrack._id}:`, err.message);
+          scrobbleService.enrichWithAnimationData(result).catch(err => {
+            console.error(`❌ Background animation enrichment failed for TrackMeta ${trackMeta._id}:`, err.message);
           });
         }, 100);
       }
 
       // 2. Spotify Metadata
-      // Check if we should enrich with Spotify
-      // - If it's a new track
-      // - OR if it's an existing track but hasn't been searched yet
-      // - AND we have Spotify credentials configured
-      const shouldEnrichWithSpotify = 
-        (isNew || !savedTrack.spotify_search_attempted) && 
-        spotifyService.isConfigured();
-
-      if (shouldEnrichWithSpotify) {
-        // Run in background with a small delay to not block the response
+      if (trackMeta && !trackMeta.spotify_search_attempted && spotifyService.isConfigured()) {
         setTimeout(() => {
-          scrobbleService.enrichWithSpotifyData(savedTrack).catch(err => {
-            console.error(`❌ Background Spotify enrichment failed for ${savedTrack._id}:`, err.message);
+          scrobbleService.enrichWithSpotifyData(result).catch(err => {
+            console.error(`❌ Background Spotify enrichment failed for TrackMeta ${trackMeta._id}:`, err.message);
           });
-        }, 200); // 200ms delay to space out API calls slightly
+        }, 200);
       }
 
       return res.status(200).json({
         success: true,
         action,
-        track: savedTrack,
+        scrobble: result,
         message: 'Scrobble received successfully'
       });
 
@@ -285,18 +263,18 @@ class ScrobbleController {
             throw new Error('ไม่สามารถสร้างข้อมูล track จาก entry นี้ได้');
           }
 
-          const savedTrack = await Track.findOrCreateTrack(trackData);
-          const action = savedTrack.action || (savedTrack.isNew ? 'created' : 'updated');
+          const result = await Scrobble.findOrCreateScrobble(trackData);
+          const action = result.action || 'created';
 
           const preview = {
-            id: savedTrack._id,
-            title: savedTrack.title,
-            artist: savedTrack.artist,
-            album: savedTrack.album,
-            timestamp: savedTrack.timestamp,
-            connector: savedTrack.connector,
-            source: savedTrack.source,
-            trackArtUrl: savedTrack.trackArtUrl
+            id: result._id,
+            title: trackData.title,
+            artist: trackData.artist,
+            album: trackData.album,
+            timestamp: trackData.timestamp,
+            connector: trackData.connector,
+            source: trackData.source,
+            trackArtUrl: trackData.trackArtUrl,
           };
 
           if (action === 'created') {
@@ -309,17 +287,13 @@ class ScrobbleController {
             summary.skipped.push(preview);
           }
 
-          // Check if we should enrich (same logic as handleScrobble approx)
-          const shouldEnrichWithSpotify =
-            (action === 'created' ||
-              (action === 'updated' && !savedTrack.spotify_search_attempted)) ||
-            (!savedTrack.spotify_search_attempted && savedTrack.eventType === 'scrobble');
-
-          if (shouldEnrichWithSpotify && spotifyService.isConfigured()) {
+          // Enrich with Spotify if needed
+          const trackMeta = result._trackMeta;
+          if (trackMeta && !trackMeta.spotify_search_attempted && spotifyService.isConfigured()) {
             summary.spotifyQueued += 1;
             setTimeout(() => {
-              scrobbleService.enrichWithSpotifyData(savedTrack).catch((error) => {
-                console.error(`❌ Failed to enrich track ${savedTrack._id} during import:`, error.message);
+              scrobbleService.enrichWithSpotifyData(result).catch((error) => {
+                console.error(`❌ Failed to enrich TrackMeta ${trackMeta._id} during import:`, error.message);
               });
             }, 100);
           }

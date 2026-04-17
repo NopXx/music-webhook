@@ -1,4 +1,14 @@
-import Track from '../models/Track.js';
+import Scrobble from '../models/Scrobble.js';
+import Artist from '../models/Artist.js';
+import Album from '../models/Album.js';
+import TrackMeta from '../models/TrackMeta.js';
+import mongoose from 'mongoose';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { buildNormalizedTrackData } from '../utils/trackNormalizer.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 class SystemController {
 
@@ -8,7 +18,7 @@ class SystemController {
   async healthCheck(req, res) {
     try {
       // Check database connection
-      await Track.findOne().limit(1);
+      await Scrobble.findOne().limit(1);
       
       res.status(200).json({
         status: 'healthy',
@@ -95,12 +105,30 @@ class SystemController {
    */
   async getDuplicateStats(req, res) {
     try {
-      const duplicateStats = await Track.aggregate([
+      const duplicateStats = await Scrobble.aggregate([
+        {
+          $lookup: {
+            from: 'trackmetas',
+            localField: 'track',
+            foreignField: '_id',
+            as: 'trackInfo'
+          }
+        },
+        { $unwind: '$trackInfo' },
+        {
+          $lookup: {
+            from: 'artists',
+            localField: 'trackInfo.artist',
+            foreignField: '_id',
+            as: 'artistInfo'
+          }
+        },
+        { $unwind: '$artistInfo' },
         {
           $group: {
             _id: {
-              artist: '$artist',
-              title: '$title',
+              artist: '$artistInfo.name',
+              title: '$trackInfo.title',
               connector: '$connector'
             },
             count: { $sum: 1 },
@@ -118,12 +146,30 @@ class SystemController {
         }
       ]);
       
-      const totalDuplicates = await Track.aggregate([
+      const totalDuplicates = await Scrobble.aggregate([
+        {
+          $lookup: {
+            from: 'trackmetas',
+            localField: 'track',
+            foreignField: '_id',
+            as: 'trackInfo'
+          }
+        },
+        { $unwind: '$trackInfo' },
+        {
+          $lookup: {
+            from: 'artists',
+            localField: 'trackInfo.artist',
+            foreignField: '_id',
+            as: 'artistInfo'
+          }
+        },
+        { $unwind: '$artistInfo' },
         {
           $group: {
             _id: {
-              artist: '$artist',
-              title: '$title',
+              artist: '$artistInfo.name',
+              title: '$trackInfo.title',
               connector: '$connector'
             },
             count: { $sum: 1 }
@@ -169,21 +215,19 @@ class SystemController {
       const dryRun = req.query.dryRun === 'true';
       
       // Find duplicates: same artist, title, connector within 5 minutes
-      const duplicates = await Track.aggregate([
+      const duplicates = await Scrobble.aggregate([
         {
           $group: {
             _id: {
-              artist: '$artist',
-              title: '$title',
+              track: '$track',
               connector: '$connector',
-              // Group by 5-minute time windows
               timeWindow: {
                 $floor: {
-                  $divide: [{ $toLong: '$scrobbledAt' }, 300000] // 5 minutes
+                  $divide: [{ $toLong: '$scrobbledAt' }, 300000]
                 }
               }
             },
-            tracks: { $push: '$ROOT' },
+            tracks: { $push: '$$ROOT' },
             count: { $sum: 1 }
           }
         },
@@ -204,8 +248,7 @@ class SystemController {
         const removeTrackIds = tracks.slice(1).map(t => t._id);
         
         duplicateGroups.push({
-          artist: group._id.artist,
-          title: group._id.title,
+          trackId: group._id.track,
           connector: group._id.connector,
           totalCount: tracks.length,
           keepTrackId: keepTrack._id,
@@ -214,7 +257,7 @@ class SystemController {
         });
         
         if (!dryRun && removeTrackIds.length > 0) {
-          await Track.deleteMany({ _id: { $in: removeTrackIds } });
+          await Scrobble.deleteMany({ _id: { $in: removeTrackIds } });
           removedCount += removeTrackIds.length;
         } else {
           removedCount += removeTrackIds.length;
@@ -291,7 +334,7 @@ class SystemController {
         filter.connector = connector;
       }
 
-      const totalMatches = await Track.countDocuments(filter);
+      const totalMatches = await Scrobble.countDocuments(filter);
 
       if (String(dryRun).toLowerCase() === 'true') {
         return res.status(200).json({
@@ -302,7 +345,7 @@ class SystemController {
         });
       }
 
-      const result = await Track.deleteMany(filter);
+      const result = await Scrobble.deleteMany(filter);
 
       return res.status(200).json({
         success: true,
@@ -322,6 +365,252 @@ class SystemController {
         error: 'Internal error',
         message: error?.message || 'เกิดข้อผิดพลาดระหว่างลบข้อมูล'
       });
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Migration endpoints
+  // ──────────────────────────────────────────────
+
+  /**
+   * Render the migration UI page.
+   */
+  renderMigratePage(req, res) {
+    res.sendFile(path.join(__dirname, '../views/migrate.html'));
+  }
+
+  /**
+   * Pre-check: count documents in old and new collections.
+   */
+  async migrationPrecheck(req, res) {
+    try {
+      const db = mongoose.connection.db;
+      const oldTracks = await db.collection('tracks').countDocuments();
+      const artists = await Artist.countDocuments();
+      const albums = await Album.countDocuments();
+      const trackMetas = await TrackMeta.countDocuments();
+      const scrobbles = await Scrobble.countDocuments();
+
+      return res.json({
+        success: true,
+        counts: {
+          oldTracks,
+          artists,
+          albums,
+          trackMetas,
+          scrobbles,
+        },
+      });
+    } catch (error) {
+      console.error('❌ Migration precheck error:', error);
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Pre-check ล้มเหลว',
+      });
+    }
+  }
+
+  /**
+   * Run the migration with streaming NDJSON progress.
+   */
+  async runMigration(req, res) {
+    const isDryRun = req.body?.dryRun !== false;
+    const BATCH_SIZE = 200;
+    const PROGRESS_INTERVAL = 300;
+
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const send = (obj) => {
+      res.write(JSON.stringify(obj) + '\n');
+    };
+
+    const stats = {
+      total: 0,
+      processed: 0,
+      artists: 0,
+      albums: 0,
+      trackMetas: 0,
+      scrobbles: 0,
+      errors: 0,
+    };
+
+    const artistCache = new Map();
+    const albumCache = new Map();
+    const trackCache = new Map();
+
+    const getOrCreateArtist = async (name, extra = {}) => {
+      if (!name?.trim()) return null;
+      const lower = name.trim().toLowerCase();
+      if (artistCache.has(lower)) return artistCache.get(lower);
+      if (isDryRun) {
+        const fake = { _id: new mongoose.Types.ObjectId(), name: name.trim(), nameLower: lower };
+        artistCache.set(lower, fake);
+        stats.artists++;
+        return fake;
+      }
+      const doc = await Artist.findOrCreateByName(name.trim(), extra);
+      artistCache.set(lower, doc);
+      stats.artists++;
+      return doc;
+    };
+
+    const getOrCreateAlbum = async (name, artistId, extra = {}) => {
+      if (!name?.trim() || !artistId) return null;
+      const lower = name.trim().toLowerCase();
+      const key = `${lower}|${artistId}`;
+      if (albumCache.has(key)) return albumCache.get(key);
+      if (isDryRun) {
+        const fake = { _id: new mongoose.Types.ObjectId(), name: name.trim(), nameLower: lower, artist: artistId };
+        albumCache.set(key, fake);
+        stats.albums++;
+        return fake;
+      }
+      const doc = await Album.findOrCreateByNameAndArtist(name.trim(), artistId, extra);
+      albumCache.set(key, doc);
+      stats.albums++;
+      return doc;
+    };
+
+    const getOrCreateTrackMeta = async (title, artistId, albumId, extra = {}) => {
+      if (!title?.trim() || !artistId) return null;
+      const lower = title.trim().toLowerCase();
+      const key = `${lower}|${artistId}`;
+      if (trackCache.has(key)) return trackCache.get(key);
+      if (isDryRun) {
+        const fake = { _id: new mongoose.Types.ObjectId(), title: title.trim(), titleLower: lower, artist: artistId, album: albumId };
+        trackCache.set(key, fake);
+        stats.trackMetas++;
+        return fake;
+      }
+      const doc = await TrackMeta.findOrCreateByIdentity(title.trim(), artistId, albumId, extra);
+      trackCache.set(key, doc);
+      stats.trackMetas++;
+      return doc;
+    };
+
+    try {
+      const db = mongoose.connection.db;
+      const oldTracks = db.collection('tracks');
+
+      stats.total = await oldTracks.countDocuments();
+      send({ type: 'start', total: stats.total });
+
+      if (stats.total === 0) {
+        send({ type: 'done', ...stats });
+        return res.end();
+      }
+
+      const cursor = oldTracks.find().sort({ scrobbledAt: 1 }).batchSize(BATCH_SIZE);
+
+      for await (const doc of cursor) {
+        stats.processed++;
+
+        try {
+          if (doc.eventType && doc.eventType !== 'scrobble') continue;
+
+          const artistName = doc.artist;
+          const albumName = doc.album;
+          const trackTitle = doc.title;
+
+          if (!artistName || !trackTitle) { stats.errors++; continue; }
+
+          const artistDoc = await getOrCreateArtist(artistName, {
+            artistUrl: doc.artistUrl || undefined,
+          });
+          if (!artistDoc) { stats.errors++; continue; }
+
+          let albumDoc = null;
+          if (albumName?.trim()) {
+            albumDoc = await getOrCreateAlbum(albumName, artistDoc._id, {
+              year: doc.year || undefined,
+              trackArtUrl: doc.trackArtUrl || undefined,
+              albumUrl: doc.albumUrl || undefined,
+            });
+          }
+
+          const tmExtra = {
+            duration: doc.duration || undefined,
+            trackNumber: doc.trackNumber || undefined,
+            genre: doc.genre || undefined,
+            trackUrl: doc.trackUrl || undefined,
+            trackArtUrl: doc.trackArtUrl || undefined,
+          };
+          if (doc.spotify) {
+            tmExtra.spotify = doc.spotify;
+            tmExtra.spotify_enriched = doc.spotify_enriched;
+            tmExtra.spotify_search_attempted = doc.spotify_search_attempted;
+            tmExtra.spotify_match_found = doc.spotify_match_found;
+          }
+          if (doc.animationUrl) tmExtra.animationUrl = doc.animationUrl;
+          if (doc.appleMusicUrl) tmExtra.appleMusicUrl = doc.appleMusicUrl;
+          if (doc.animation_search_attempted !== undefined) tmExtra.animation_search_attempted = doc.animation_search_attempted;
+          if (doc.animation_match_found !== undefined) tmExtra.animation_match_found = doc.animation_match_found;
+
+          const trackMeta = await getOrCreateTrackMeta(
+            trackTitle, artistDoc._id, albumDoc?._id || null, tmExtra
+          );
+          if (!trackMeta) { stats.errors++; continue; }
+
+          if (!isDryRun) {
+            await Scrobble.create({
+              track: trackMeta._id,
+              timestamp: doc.timestamp || doc.scrobbledAt || new Date(),
+              scrobbledAt: doc.scrobbledAt || doc.timestamp || new Date(),
+              source: doc.source || 'web-scrobbler',
+              connector: doc.connector,
+              originalUrl: doc.originalUrl,
+              eventType: doc.eventType || 'scrobble',
+              isLoved: doc.isLoved || false,
+              isLovedInService: doc.isLovedInService,
+              playCount: doc.playCount || 1,
+              userPlayCount: doc.userPlayCount,
+              metadataLabel: doc.metadataLabel,
+              albumArtist: doc.albumArtist,
+              isScrobbled: doc.isScrobbled !== false,
+              isCorrectedByUser: doc.isCorrectedByUser || false,
+              isValid: doc.isValid !== false,
+              startTimestamp: doc.startTimestamp,
+              currentTime: doc.currentTime,
+              userAgent: doc.userAgent,
+              ipAddress: doc.ipAddress,
+              rawData: doc.rawData,
+            });
+          }
+          stats.scrobbles++;
+
+        } catch (err) {
+          stats.errors++;
+          send({ type: 'error', docId: String(doc._id), message: err.message });
+        }
+
+        // Send progress every N docs
+        if (stats.processed % PROGRESS_INTERVAL === 0) {
+          const pct = ((stats.processed / stats.total) * 100).toFixed(1);
+          send({
+            type: 'progress',
+            processed: stats.processed,
+            total: stats.total,
+            pct,
+            artists: stats.artists,
+            albums: stats.albums,
+            trackMetas: stats.trackMetas,
+            sclobbles: stats.scrobbles,
+            scrobbles: stats.scrobbles,
+            errors: stats.errors,
+          });
+        }
+      }
+
+      send({ type: 'done', ...stats });
+      res.end();
+
+    } catch (error) {
+      console.error('❌ Migration error:', error);
+      send({ type: 'error', docId: 'fatal', message: error.message });
+      send({ type: 'done', ...stats });
+      res.end();
     }
   }
 }

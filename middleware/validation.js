@@ -1,14 +1,10 @@
-const toDate = (value) => {
-  if (value === undefined || value === null) return null;
-  if (value instanceof Date) return value;
-  if (typeof value === 'string' && value.trim() === '') return null;
-  const num = typeof value === 'string' ? Number(value) : value;
-  if (!Number.isFinite(num)) return null;
-  // Treat values larger than 1e12 as already in milliseconds
-  const millis = num > 1e12 ? num : num * 1000;
-  const date = new Date(millis);
-  return Number.isFinite(date.getTime()) ? date : null;
-};
+import {
+  normalizeDate,
+  coerceNumber,
+  isNonEmptyString,
+  normalizeStartTimestamp,
+  deriveTrackArtUrl,
+} from '../utils/trackNormalizer.js';
 
 export const normalizeListenBrainzEntry = (payload = {}) => {
   if (!payload || typeof payload !== 'object') {
@@ -42,35 +38,18 @@ export const normalizeListenBrainzEntry = (payload = {}) => {
     duration = Math.round(additionalInfo.duration);
   }
 
-  const coverArtCandidates = [
-    additionalInfo.cover_art_url,
-    additionalInfo.coverart,
-    additionalInfo.album_art_url,
-    additionalInfo.album_coverart_url,
-    additionalInfo.track_art_url,
-    additionalInfo.image,
-    additionalInfo.image_url,
-  ].filter((value) => typeof value === 'string' && value.trim().length > 0);
+  let trackArtUrl = deriveTrackArtUrl(
+    { track_metadata: metadata },
+    null
+  );
 
-  let trackArtUrl = null;
-  if (coverArtCandidates.length > 0) {
-    trackArtUrl = coverArtCandidates[0];
-  } else {
-    const releaseForCover = mapping.caa_release_mbid || mapping.release_mbid;
-    if (releaseForCover) {
-      trackArtUrl = mapping.caa_id
-        ? `https://coverartarchive.org/release/${releaseForCover}/${mapping.caa_id}.jpg`
-        : `https://coverartarchive.org/release/${releaseForCover}/front`;
-    }
-  }
-
-  const listenedAt = toDate(payload.listened_at);
-  const insertedAt = toDate(payload.inserted_at);
+  const listenedAt = normalizeDate(payload.listened_at);
+  const insertedAt = normalizeDate(payload.inserted_at);
   const timestamp =
     listenedAt ||
     insertedAt ||
-    toDate(payload.timestamp) ||
-    toDate(payload.time) ||
+    normalizeDate(payload.timestamp) ||
+    normalizeDate(payload.time) ||
     null;
 
   return {
@@ -130,29 +109,6 @@ export const validateTrackData = (req, res, next) => {
   let listenedAt = null;
   let insertedAt = null;
 
-  const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
-  const coerceNumber = (value) => {
-    if (value === undefined || value === null) return null;
-    const num = Number(value);
-    return Number.isFinite(num) ? num : null;
-  };
-  const normalizeStartTimestamp = (value) => {
-    if (value === undefined || value === null) return null;
-    if (value instanceof Date) {
-      return Number.isFinite(value.getTime()) ? value : null;
-    }
-    if (typeof value === 'string' && value.trim().length === 0) {
-      return null;
-    }
-    const numeric = coerceNumber(value);
-    if (numeric !== null) {
-      const millis = numeric > 1e12 ? numeric : numeric * 1000;
-      const date = new Date(millis);
-      return Number.isFinite(date.getTime()) ? date : null;
-    }
-    const parsed = new Date(value);
-    return Number.isFinite(parsed.getTime()) ? parsed : null;
-  };
   const applyMetadata = (metadataSource) => {
     if (!metadataSource || typeof metadataSource !== 'object') return;
 

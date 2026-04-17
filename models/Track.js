@@ -1,15 +1,12 @@
 import mongoose from 'mongoose';
-
-const SOURCE_VALUES = [
-  'web-scrobbler',
-  'last.fm',
-  'spotify',
-  'apple-music',
-  'listenbrainz',
-  'listenbrainz-import',
-  'listenbrainz lastfm importer v2',
-  'other'
-];
+import {
+  SOURCE_VALUES,
+  normalizeTrackFields,
+  buildNormalizedTrackData,
+  normalizeSource,
+  normalizeDate,
+  deriveTrackArtUrl,
+} from '../utils/trackNormalizer.js';
 
 const trackSchema = new mongoose.Schema({
   // Track information
@@ -287,12 +284,7 @@ trackSchema.virtual('formattedDuration').get(function() {
 
 // Pre-save middleware to handle duplicates and cleanup
 trackSchema.pre('save', function(next) {
-  // Trim and clean up string fields
-  if (this.title) this.title = this.title.trim();
-  if (this.artist) this.artist = this.artist.trim();
-  if (this.album) this.album = this.album.trim();
-  if (this.albumArtist) this.albumArtist = this.albumArtist.trim();
-  
+  normalizeTrackFields(this);
   next();
 });
 
@@ -347,136 +339,12 @@ trackSchema.statics.findOrCreateTrack = async function(trackData) {
     return tempDoc;
   }
 
-  // --- Normalize incoming payload to use "processed" fields for storage ---
-  // Prefer the raw webhook payload (data.song) when available so we can use `processed` fields
-  const songRoot =
-    trackData?.song ||
-    trackData?.data?.song ||
-    trackData?.rawData?.data?.song ||
-    {};
-
-  // Build canonical data, preferring "processed" fields first, then "parsed", then top-level fallbacks
-  const processed = songRoot?.processed || {};
-  const parsed = songRoot?.parsed || {};
-  const metadata = songRoot?.metadata || {};
-  const connectorInfo = songRoot?.connector || {};
-
-  const normalizeDate = (value) => {
-    if (!value) return null;
-    const date = value instanceof Date ? value : new Date(value);
-    return Number.isFinite(date.getTime()) ? date : null;
-  };
-
-  const normalizeSource = (value) => {
-    if (!value) return 'web-scrobbler';
-    const normalized = value.toString().trim().toLowerCase();
-    return SOURCE_VALUES.includes(normalized) ? normalized : 'other';
-  };
-
-  const deriveTrackArtUrl = (rawPayload, existingUrl = null) => {
-    if (existingUrl && typeof existingUrl === 'string' && existingUrl.trim().length > 0) {
-      return existingUrl;
-    }
-    if (!rawPayload || typeof rawPayload !== 'object') {
-      return existingUrl;
-    }
-
-    const trackMetadata = rawPayload.track_metadata || rawPayload.trackMetadata || {};
-    const additionalInfo = trackMetadata.additional_info || trackMetadata.additionalInfo || {};
-    const mapping = trackMetadata.mbid_mapping || trackMetadata.mbidMapping || {};
-
-    const candidates = [
-      additionalInfo.cover_art_url,
-      additionalInfo.coverart,
-      additionalInfo.album_art_url,
-      additionalInfo.album_coverart_url,
-      additionalInfo.track_art_url,
-      additionalInfo.image,
-      additionalInfo.image_url,
-      rawPayload.trackArtUrl, // fallback if importer placed it at root
-    ].filter((candidate) => typeof candidate === 'string' && candidate.trim().length > 0);
-
-    if (candidates.length > 0) {
-      return candidates[0];
-    }
-
-    const releaseForCover = mapping.caa_release_mbid || mapping.release_mbid;
-    if (releaseForCover) {
-      if (mapping.caa_id) {
-        return `https://coverartarchive.org/release/${releaseForCover}/${mapping.caa_id}.jpg`;
-      }
-      return `https://coverartarchive.org/release/${releaseForCover}/front`;
-    }
-
-    return existingUrl;
-  };
-
-  const normalizedTimestamp = normalizeDate(trackData?.timestamp) || new Date();
-  const normalizedScrobbledAt = normalizeDate(trackData?.scrobbledAt) || normalizedTimestamp;
-
-  const data = {
-    // Core identity: strictly prefer processed
-    title: processed.track ?? parsed.track ?? trackData?.title,
-    artist: processed.artist ?? parsed.artist ?? trackData?.artist,
-    album: processed.album ?? parsed.album ?? trackData?.album,
-    albumArtist: processed.albumArtist ?? parsed.albumArtist ?? trackData?.albumArtist,
-
-    // Duration: prefer processed, then parsed, then any provided fallback
-    duration:
-      processed.duration ??
-      parsed.duration ??
-      trackData?.duration ??
-      undefined,
-
-    // Source / connector and URLs
-    connector:
-      connectorInfo?.id ??
-      connectorInfo?.label ??
-      trackData?.connector ??
-      undefined,
-    originalUrl: parsed?.originUrl ?? trackData?.originalUrl ?? undefined,
-
-    // Last.fm / service metadata mirrors
-    trackArtUrl: metadata?.trackArtUrl ?? trackData?.trackArtUrl ?? undefined,
-    artistUrl: metadata?.artistUrl ?? trackData?.artistUrl ?? undefined,
-    trackUrl: metadata?.trackUrl ?? trackData?.trackUrl ?? undefined,
-    albumUrl: metadata?.albumUrl ?? trackData?.albumUrl ?? undefined,
-    metadataLabel: metadata?.label ?? trackData?.metadataLabel ?? undefined,
-    animationUrl: metadata?.animationUrl ?? trackData?.animationUrl ?? undefined,
-    masterTallUrl: metadata?.masterTallUrl ?? trackData?.masterTallUrl ?? undefined,
-    primaryMediaUrl: metadata?.primaryMediaUrl ?? trackData?.primaryMediaUrl ?? undefined,
-    primaryMediaType: metadata?.primaryMediaType ?? trackData?.primaryMediaType ?? undefined,
-    userPlayCount: metadata?.userPlayCount ?? trackData?.userPlayCount ?? undefined,
-    isLovedInService: metadata?.userloved ?? trackData?.isLovedInService ?? undefined,
-
-    // Timing
-    startTimestamp: metadata?.startTimestamp
-      ? new Date(metadata.startTimestamp * 1000)
-      : trackData?.startTimestamp,
-
-    // Scrobble timing
-    timestamp: normalizedTimestamp,
-    scrobbledAt: normalizedScrobbledAt,
-
-    // Flags / status
-    isScrobbled: true,
-    eventType,
-    source: normalizeSource(trackData?.source),
-
-    // Keep the raw webhook for debugging / audits
-    rawData: trackData?.rawData || trackData,
-    lastfmMbid: trackData?.lastfmMbid ?? undefined,
-  };
-
-  if (!data.trackArtUrl) {
-    const derivedArt = deriveTrackArtUrl(trackData?.rawData || trackData, null);
-    if (derivedArt) {
-      data.trackArtUrl = derivedArt;
-    }
-  }
+  // --- Normalize incoming payload using centralized normalizer ---
+  const data = buildNormalizedTrackData(trackData, eventType);
 
   // Validate required identity after normalization
   if (!data.artist || !data.title) {
+    const songRoot = trackData?.song || trackData?.data?.song || trackData?.rawData?.data?.song || {};
     console.warn('⚠️ Missing artist/title after normalization, skipping save.', {
       data,
       trackDataSample: {

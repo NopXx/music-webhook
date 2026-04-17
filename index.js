@@ -150,6 +150,14 @@ class MusicWebhookServer {
     this.app.post('/api/spotify/update-missing', asyncHandler(webhookRoutes.updateMissingSpotifyData));
     this.app.delete('/api/spotify/cache', asyncHandler(webhookRoutes.clearSpotifyCache));
 
+    // Migration endpoints
+    this.app.get('/migrate', webhookRoutes.renderMigratePage);
+    this.app.get('/api/migrate/precheck', asyncHandler(webhookRoutes.migrationPrecheck));
+    this.app.post('/api/migrate/run',
+      validateContentType,
+      webhookRoutes.runMigration  // Not wrapped in asyncHandler — handles its own streaming
+    );
+
     // API info endpoint
     this.app.get('/api', (req, res) => {
       res.json({
