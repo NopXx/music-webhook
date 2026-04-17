@@ -197,7 +197,6 @@ trackMetaSchema.statics.findOrCreateByIdentity = async function (title, artistId
 
   let trackMeta = await this.findOne({ titleLower: lower, artist: artistId });
   if (trackMeta) {
-    // Patch missing fields
     let dirty = false;
     if (albumId && !trackMeta.album) { trackMeta.album = albumId; dirty = true; }
     if (extra.duration && !trackMeta.duration) { trackMeta.duration = extra.duration; dirty = true; }
@@ -206,6 +205,11 @@ trackMetaSchema.statics.findOrCreateByIdentity = async function (title, artistId
     if (extra.trackUrl && !trackMeta.trackUrl) { trackMeta.trackUrl = extra.trackUrl; dirty = true; }
     if (extra.trackArtUrl && !trackMeta.trackArtUrl) { trackMeta.trackArtUrl = extra.trackArtUrl; dirty = true; }
     if (extra.lastfmMbid && !trackMeta.lastfmMbid) { trackMeta.lastfmMbid = extra.lastfmMbid; dirty = true; }
+    if (extra.animationUrl && !trackMeta.animationUrl) { trackMeta.animationUrl = extra.animationUrl; dirty = true; }
+    if (extra.appleMusicUrl && !trackMeta.appleMusicUrl) { trackMeta.appleMusicUrl = extra.appleMusicUrl; dirty = true; }
+    if (extra.masterTallUrl && !trackMeta.masterTallUrl) { trackMeta.masterTallUrl = extra.masterTallUrl; dirty = true; }
+    if (extra.primaryMediaUrl && !trackMeta.primaryMediaUrl) { trackMeta.primaryMediaUrl = extra.primaryMediaUrl; dirty = true; }
+    if (extra.spotify && !trackMeta.spotify) { trackMeta.spotify = extra.spotify; dirty = true; }
     if (dirty) await trackMeta.save();
     return trackMeta;
   }
