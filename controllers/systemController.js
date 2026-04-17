@@ -380,6 +380,13 @@ class SystemController {
   }
 
   /**
+   * Render the track inspection UI page.
+   */
+  renderInspectPage(req, res) {
+    res.sendFile(path.join(__dirname, '../views/inspect.html'));
+  }
+
+  /**
    * Pre-check: count documents in old and new collections.
    */
   async migrationPrecheck(req, res) {

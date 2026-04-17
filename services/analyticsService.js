@@ -408,6 +408,9 @@ export const getTracksListing = async ({
   sortBy,
   order,
   search,
+  searchTitle,
+  searchArtist,
+  searchAlbum,
   connector,
   source,
   range = 'all-time',
@@ -437,6 +440,7 @@ export const getTracksListing = async ({
   ];
 
   // If there is a search query, filter after hydration
+  // If there is a global search query
   if (search && typeof search === 'string') {
     const keywords = search.trim();
     if (keywords.length > 0) {
@@ -451,6 +455,22 @@ export const getTracksListing = async ({
         }
       });
     }
+  }
+
+  // Field-specific search queries (combinable via $and inside the match pipeline step)
+  const fieldMatches = {};
+  if (searchTitle?.trim()) {
+    fieldMatches.title = new RegExp(searchTitle.trim().replace(/\s+/g, '.*'), 'i');
+  }
+  if (searchArtist?.trim()) {
+    fieldMatches.artist = new RegExp(searchArtist.trim().replace(/\s+/g, '.*'), 'i');
+  }
+  if (searchAlbum?.trim()) {
+    fieldMatches.album = new RegExp(searchAlbum.trim().replace(/\s+/g, '.*'), 'i');
+  }
+  
+  if (Object.keys(fieldMatches).length > 0) {
+    pipeline.push({ $match: fieldMatches });
   }
 
   // Count total after filtering

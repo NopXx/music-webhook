@@ -41,6 +41,7 @@ const WebhookRoutes = {
 
   // Migration
   renderMigratePage: systemController.renderMigratePage.bind(systemController),
+  renderInspectPage: systemController.renderInspectPage.bind(systemController),
   migrationPrecheck: systemController.migrationPrecheck.bind(systemController),
   runMigration: systemController.runMigration.bind(systemController),
 };

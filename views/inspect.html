@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Track Inspector</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #8b5cf6;
+      --border: #334155;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    header {
+      margin-bottom: 2rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1rem;
+    }
+    h1 { margin: 0; font-size: 1.5rem; }
+    p { color: var(--text-muted); margin-top: 0.5rem; }
+    
+    .search-box {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    input {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 1rem;
+    }
+    button {
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      border: none;
+      background: var(--primary);
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { opacity: 0.9; }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem 1rem;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 2rem;
+      font-weight: bold;
+      color: var(--primary);
+      margin: 0 0 0.5rem;
+    }
+    .stat-label {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 0;
+    }
+
+    .track-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .track-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 1rem;
+      border: 1px solid var(--border);
+    }
+    .track-header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      cursor: pointer;
+    }
+    .track-art {
+      width: 60px;
+      height: 60px;
+      border-radius: 8px;
+      object-fit: cover;
+      background: #333;
+    }
+    .track-info flex { flex: 1; }
+    .track-title { font-weight: bold; font-size: 1.1rem; margin: 0 0 0.25rem; }
+    .track-artist { color: var(--text-muted); margin: 0; font-size: 0.9rem; }
+    
+    .track-json {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #000;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-family: monospace;
+      font-size: 0.85rem;
+      color: #10b981;
+      display: none;
+    }
+    .track-card.open .track-json { display: block; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🔍 Track Inspector</h1>
+      <p>ค้นหาและตรวจสอบรายละเอียดข้อมูล (Raw Data) ของแต่ละ Scrobble สำหรับ Normalized Schema</p>
+    </header>
+
+    <div class="stats-grid" id="stats-grid">
+      <!-- Stats will load here -->
+    </div>
+
+    <div class="search-box">
+      <input type="text" id="search-title" placeholder="ชื่อเพลง (Title)" autocomplete="off" />
+      <input type="text" id="search-artist" placeholder="ศิลปิน (Artist)" autocomplete="off" />
+      <input type="text" id="search-album" placeholder="อัลบั้ม (Album)" autocomplete="off" />
+      <button id="search-btn">ค้นหา</button>
+    </div>
+
+    <div style="margin-bottom: 1rem; color: var(--text-muted); font-weight: 600;" id="search-results-info"></div>
+
+    <div class="track-list" id="track-list">
+      <!-- Tracks will render here -->
+    </div>
+  </div>
+
+  <script>
+    const searchTitle = document.getElementById('search-title');
+    const searchArtist = document.getElementById('search-artist');
+    const searchAlbum = document.getElementById('search-album');
+    const searchBtn = document.getElementById('search-btn');
+    const trackList = document.getElementById('track-list');
+    const statsGrid = document.getElementById('stats-grid');
+    const resultsInfo = document.getElementById('search-results-info');
+
+    async function fetchStats() {
+      try {
+        statsGrid.innerHTML = '<p style="grid-column: 1/-1; text-align:center; color:var(--text-muted);">Loading stats...</p>';
+        const res = await fetch('/api/migrate/precheck');
+        if (!res.ok) throw new Error('Failed to load stats');
+        const data = await res.json();
+        
+        if (data.success && data.counts) {
+          statsGrid.innerHTML = `
+            <div class="stat-card">
+              <p class="stat-value">${data.counts.artists.toLocaleString()}</p>
+              <p class="stat-label">Artists</p>
+            </div>
+            <div class="stat-card">
+              <p class="stat-value">${data.counts.albums.toLocaleString()}</p>
+              <p class="stat-label">Albums</p>
+            </div>
+            <div class="stat-card">
+              <p class="stat-value">${data.counts.trackMetas.toLocaleString()}</p>
+              <p class="stat-label">Track Metas</p>
+            </div>
+            <div class="stat-card">
+              <p class="stat-value">${data.counts.scrobbles.toLocaleString()}</p>
+              <p class="stat-label">Scrobbles</p>
+            </div>
+          `;
+        }
+      } catch (err) {
+        statsGrid.innerHTML = `<p style="grid-column: 1/-1; text-align:center; color:#ef4444;">${err.message}</p>`;
+      }
+    }
+
+    async function fetchTracks() {
+      trackList.innerHTML = '<p style="text-align:center;">กำลังโหลดข้อมูล...</p>';
+      resultsInfo.innerHTML = '';
+      
+      try {
+        const queryParams = new URLSearchParams({ limit: 20 });
+        if (searchTitle.value.trim()) queryParams.append('searchTitle', searchTitle.value.trim());
+        if (searchArtist.value.trim()) queryParams.append('searchArtist', searchArtist.value.trim());
+        if (searchAlbum.value.trim()) queryParams.append('searchAlbum', searchAlbum.value.trim());
+        
+        const url = `/api/tracks?${queryParams.toString()}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Network error');
+        
+        const data = await res.json();
+        
+        // Show count
+        const total = data.pagination?.total || 0;
+        resultsInfo.innerHTML = `พบข้อมูลทั้งหมด: <span style="color:var(--primary)">${total.toLocaleString()}</span> รายการ`;
+
+        renderTracks(data.tracks || []);
+      } catch (err) {
+        trackList.innerHTML = `<p style="color:#ef4444;text-align:center;">เกิดข้อผิดพลาด: ${err.message}</p>`;
+      }
+    }
+
+    function renderTracks(tracks) {
+      if (tracks.length === 0) {
+        trackList.innerHTML = '<p style="text-align:center;color:var(--text-muted)">ไม่พบข้อมูล</p>';
+        return;
+      }
+
+      trackList.innerHTML = tracks.map(track => {
+        const art = track.trackArtUrl || track.albumArtUrl || 'https://via.placeholder.com/60';
+        // Pretty print the JSON ignoring some huge fields if needed, but here we show all
+        const prettyJson = JSON.stringify(track, null, 2);
+        
+        return `
+          <div class="track-card" onclick="this.classList.toggle('open')">
+            <div class="track-header">
+              <img src="${art}" alt="Art" class="track-art" />
+              <div class="track-info">
+                <h3 class="track-title">${track.title}</h3>
+                <p class="track-artist">${track.artist} &bull; ${track.album || 'Unknown Album'}</p>
+                <p style="font-size:0.8rem; margin:0; margin-top:4px; color:var(--primary)">Scrobbled: ${new Date(track.scrobbledAt).toLocaleString()}</p>
+              </div>
+            </div>
+            <pre class="track-json">${prettyJson}</pre>
+          </div>
+        `;
+      }).join('');
+    }
+
+    searchBtn.addEventListener('click', () => fetchTracks());
+    
+    const triggerSearch = (e) => { if (e.key === 'Enter') fetchTracks(); };
+    searchTitle.addEventListener('keypress', triggerSearch);
+    searchArtist.addEventListener('keypress', triggerSearch);
+    searchAlbum.addEventListener('keypress', triggerSearch);
+
+    // Initial load
+    fetchStats();
+    fetchTracks();
+  </script>
+</body>
+</html>

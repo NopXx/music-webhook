@@ -152,6 +152,7 @@ class MusicWebhookServer {
 
     // Migration endpoints
     this.app.get('/migrate', webhookRoutes.renderMigratePage);
+    this.app.get('/inspect', webhookRoutes.renderInspectPage);
     this.app.get('/api/migrate/precheck', asyncHandler(webhookRoutes.migrationPrecheck));
     this.app.post('/api/migrate/run',
       validateContentType,
