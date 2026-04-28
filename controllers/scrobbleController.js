@@ -22,6 +22,21 @@ class ScrobbleController {
       const { validatedTrack } = req;
       const trackData = scrobbleService.parseScrobbleData(req.body, req, validatedTrack);
       
+      if (trackData.eventType === 'paused' || trackData.eventType === 'stopped') {
+        nowPlayingService.updateFromEvent(trackData);
+        const npStatus = nowPlayingService.getStatus();
+        return res.status(200).json({
+          success: true,
+          action: 'ignored',
+          message: `Now playing ${trackData.eventType}`,
+          nowPlaying: npStatus,
+          track: {
+            title: trackData.title,
+            artist: trackData.artist,
+          }
+        });
+      }
+
       if (trackData.eventType === 'nowplaying') {
         nowPlayingService.setPlaying(trackData);
 
