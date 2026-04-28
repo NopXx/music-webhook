@@ -66,9 +66,10 @@ class NowPlayingService {
     const d = trackData || {};
     const now = new Date();
     const progress = typeof d.currentTime === 'number' ? d.currentTime : (this.current?.progressSeconds ?? null);
+    const hasTrackIdentity = !!(d.title && d.artist);
     this.current = {
       status: 'paused',
-      track: trackData ? this.buildTrackInfo(trackData) : (this.current?.track || this.buildTrackInfo({})),
+      track: hasTrackIdentity ? this.buildTrackInfo(d) : (this.current?.track || this.buildTrackInfo({})),
       startedAt: this.current?.startedAt || now,
       lastUpdate: now,
       progressSeconds: progress,
@@ -81,7 +82,8 @@ class NowPlayingService {
     // Guard: allow calling without arguments (from playerController)
     const d = trackData || {};
     const now = new Date();
-    const track = trackData ? this.buildTrackInfo(trackData) : (this.current?.track || this.buildTrackInfo({}));
+    const hasTrackIdentity = !!(d.title && d.artist);
+    const track = hasTrackIdentity ? this.buildTrackInfo(d) : (this.current?.track || this.buildTrackInfo({}));
     this.current = {
       status: 'stopped',
       track,
@@ -128,14 +130,21 @@ class NowPlayingService {
 
   updateFromEvent(trackData) {
     const type = (trackData.eventType || '').toLowerCase();
-    if (!trackData.title || !trackData.artist) return; // ignore invalid
+
+    if (type === 'paused') {
+      this.setPaused(trackData);
+      return;
+    }
+    if (type === 'stopped') {
+      this.setStopped(trackData);
+      return;
+    }
+
+    // Playing-style events require track identity
+    if (!trackData.title || !trackData.artist) return;
 
     if (type === 'nowplaying' || type === 'resumed' || type === 'resumedplaying' || type === 'scrobble') {
       this.setPlaying(trackData);
-    } else if (type === 'paused') {
-      this.setPaused(trackData);
-    } else if (type === 'stopped') {
-      this.setStopped(trackData);
     }
   }
 
