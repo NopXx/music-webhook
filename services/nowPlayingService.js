@@ -3,8 +3,21 @@
 class NowPlayingService {
   constructor() {
     this.current = null; // { track, status, startedAt, lastUpdate, progress }
+    this._version = 0;   // monotonic counter for race-condition guards
     this._cachedStatus = null;
     this._cachedAt = 0;
+  }
+
+  /** Return current version — used by enrichment callbacks to detect stale results */
+  getVersion() {
+    return this._version;
+  }
+
+  /** Reset to idle — clears all in-memory state */
+  setIdle() {
+    this.current = null;
+    this._version++;
+    this._invalidateCache();
   }
 
   // Normalize minimal track info from webhook trackData
@@ -39,11 +52,23 @@ class NowPlayingService {
   setPlaying(trackData) {
     const now = new Date();
     const prev = this.current;
-    const progress = typeof trackData.currentTime === 'number'
-      ? trackData.currentTime
-      : (prev?.status === 'paused' && typeof prev?.progressSeconds === 'number'
-          ? prev.progressSeconds
-          : null);
+
+    // Compute progress — prefer explicit currentTime, else carry from paused,
+    // else derive from startedAt, else null
+    let progress;
+    if (typeof trackData.currentTime === 'number') {
+      progress = trackData.currentTime;
+    } else if (prev?.status === 'paused' && typeof prev?.progressSeconds === 'number') {
+      progress = prev.progressSeconds;
+    } else if (prev?.startedAt) {
+      progress = Math.floor((now - prev.startedAt) / 1000);
+      if (prev.track?.duration && progress > prev.track.duration) {
+        progress = prev.track.duration;
+      }
+    } else {
+      progress = null;
+    }
+
     const startedAt = trackData.startTimestamp
       ? new Date(trackData.startTimestamp)
       : (progress != null
@@ -58,6 +83,7 @@ class NowPlayingService {
       progressSeconds: progress,
       source: trackData.source || 'web-scrobbler',
     };
+    this._version++;
     this._invalidateCache();
   }
 
@@ -65,7 +91,14 @@ class NowPlayingService {
     // Guard: allow calling without arguments (from playerController)
     const d = trackData || {};
     const now = new Date();
-    const progress = typeof d.currentTime === 'number' ? d.currentTime : (this.current?.progressSeconds ?? null);
+
+    // Compute progress — prefer explicit currentTime, else derive from startedAt,
+    // else carry forward previous progressSeconds
+    const explicitProgress = typeof d.currentTime === 'number' ? d.currentTime : null;
+    const progress = explicitProgress ??
+      (this.current?.startedAt ? Math.floor((now - this.current.startedAt) / 1000) :
+       (this.current?.progressSeconds ?? null));
+
     const hasTrackIdentity = !!(d.title && d.artist);
     this.current = {
       status: 'paused',
@@ -75,6 +108,7 @@ class NowPlayingService {
       progressSeconds: progress,
       source: d.source || this.current?.source || 'web-scrobbler',
     };
+    this._version++;
     this._invalidateCache();
   }
 
@@ -82,6 +116,12 @@ class NowPlayingService {
     // Guard: allow calling without arguments (from playerController)
     const d = trackData || {};
     const now = new Date();
+
+    // Compute progress from startedAt, else carry forward
+    const progress = this.current?.startedAt
+      ? Math.floor((now - this.current.startedAt) / 1000)
+      : (this.current?.progressSeconds ?? null);
+
     const hasTrackIdentity = !!(d.title && d.artist);
     const track = hasTrackIdentity ? this.buildTrackInfo(d) : (this.current?.track || this.buildTrackInfo({}));
     this.current = {
@@ -89,9 +129,10 @@ class NowPlayingService {
       track,
       startedAt: this.current?.startedAt || now,
       lastUpdate: now,
-      progressSeconds: this.current?.progressSeconds ?? null,
+      progressSeconds: progress,
       source: d.source || this.current?.source || 'web-scrobbler',
     };
+    this._version++;
     this._invalidateCache();
   }
 
@@ -120,6 +161,7 @@ class NowPlayingService {
         this.current.progressSeconds = Math.floor((now - this.current.startedAt) / 1000);
       }
     }
+    this._version++;
     this._invalidateCache();
   }
 
@@ -205,7 +247,7 @@ class NowPlayingService {
 
     const result = {
       playing,
-      status: playing ? 'playing' : (status === 'paused' ? 'paused' : 'stopped'),
+      status: playing ? 'playing' : (status === 'paused' ? 'paused' : (status === 'stopped' ? 'stopped' : 'idle')),
       updatedAt: lastUpdate,
       startedAt,
       elapsed,

@@ -41,9 +41,13 @@ class ScrobbleController {
         nowPlayingService.setPlaying(trackData);
 
         // Background: enrich with Apple Music animated artwork (fire-and-forget)
-        if (trackData.title && trackData.artist) {
+        // Skip if track already has animationUrl; use version guard to prevent stale results
+        const trackHasArtwork = nowPlayingService.current?.track?.animationUrl;
+        if (trackData.title && trackData.artist && !trackHasArtwork) {
+          const version = nowPlayingService.getVersion();
           appleMusicService.fetchAnimatedArtwork(trackData.title, trackData.artist, trackData.album || '')
             .then(result => {
+              if (nowPlayingService.getVersion() !== version) return; // State changed, discard
               if (result.success && result.animationUrl && nowPlayingService.current?.track) {
                 nowPlayingService.current.track.animationUrl = result.animationUrl;
                 if (result.appleMusicUrl) {

@@ -61,7 +61,9 @@ class PlayerController {
         nowPlayingService.setPlaying(track);
 
         // Background: enrich with Apple Music animated artwork (fire-and-forget)
-        if (track.title && track.artist) {
+        // Skip if track already has animationUrl; use version guard to prevent stale results
+        const trackHasArtwork = nowPlayingService.current?.track?.animationUrl;
+        if (track.title && track.artist && !trackHasArtwork) {
           this._enrichNowPlayingArtwork(track.title, track.artist, track.album);
         }
       } else if (state === 'paused') {
@@ -91,8 +93,10 @@ class PlayerController {
    * the in-memory now-playing track (fire-and-forget).
    */
   _enrichNowPlayingArtwork(title, artist, album = '') {
+    const version = nowPlayingService.getVersion();
     appleMusicService.fetchAnimatedArtwork(title, artist, album)
       .then(result => {
+        if (nowPlayingService.getVersion() !== version) return; // State changed, discard
         if (result.success && result.animationUrl && nowPlayingService.current?.track) {
           nowPlayingService.current.track.animationUrl = result.animationUrl;
           if (result.appleMusicUrl) {
