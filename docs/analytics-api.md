@@ -1,11 +1,11 @@
 # Analytics API Documentation
 
-ชุด API endpoint สำหรับสำรวจและจัดการข้อมูลการฟังเพลงใน MongoDB  
+ชุด API endpoint สำหรับสํารวจและจัดการข้อมูลการฟังเพลงใน MongoDB  
 ทุก endpoint รองรับ `Accept: application/json` และได้รับการคุ้มครองด้วย middleware (rate limit, logging)
 
 ---
 
-## 📊 พารามิเตอร์ร่วม
+## พารามิเตอร์ร่วม
 
 | ชื่อ | ประเภท | คำอธิบาย |
 |------|--------|-----------|
@@ -16,20 +16,65 @@
 
 ---
 
-## 📈 Statistics & Overview
+## Root & Info
 
-### 1) GET `/api/stats`
+### 1) GET `/`
+
+**คำอธิบาย:** Welcome message พร้อมรายการ endpoint และฟีเจอร์
+
+**Response:**
+
+```json
+{
+  "message": "Music Webhook Server",
+  "version": "1.0.0",
+  "framework": "Express.js + Bun.js",
+  "features": [
+    "Multiple webhook formats (Web Scrobbler, ListenBrainz, custom JSON)",
+    "Duplicate prevention & Spotify enrichment queue",
+    "In-memory Now Playing state with refresh endpoints",
+    "ListenBrainz bulk import UI + API"
+  ],
+  "endpoints": { ... },
+  "notes": [ ... ]
+}
+```
+
+### 2) GET `/api`
+
+**คำอธิบาย:** Dynamic JSON listing ของทุก endpoint ที่มี
+
+**Response:**
+
+```json
+{
+  "message": "Music Webhook API",
+  "version": "1.0.0",
+  "endpoints": {
+    "GET /api/stats": "Get scrobbling statistics",
+    "GET /api/tracks": "Get tracks with pagination/search",
+    ...
+  }
+}
+```
+
+---
+
+## Statistics & Overview
+
+### 3) GET `/api/stats`
 
 **คำอธิบาย:** ดึงสถิติรวมของการฟังเพลงในช่วงเวลาที่กำหนด
 
 **Query Parameters:**
 - `range` - ช่วงเวลา (week, month, year, all-time)
 - `offset` - เลื่อนช่วงเวลา (0 = ปัจจุบัน, 1 = ช่วงก่อนหน้า)
-- `recentLimit` - จำนวนรายการล่าสุด (default: 10)
+- `recentLimit` - จำนวนรายการล่าสุด (default: 10, max: 25)
+- `topArtistLimit` - จำนวน top artists (default: 5)
 - `tz` - timezone
 
-**Query:** `?range=week&offset=0&recentLimit=10`  
-**Response:** สรุปรวมจำนวนเพลง/ศิลปิน/เพลย์ ระยะเวลาฟังเฉลี่ย, connector ยอดนิยม, รายการล่าสุด พร้อมสถิติ Spotify (ถ้าเปิดไว้)
+**Query:** `?range=week&offset=0&recentLimit=10&topArtistLimit=5`  
+**Response:** สรุปรวมจำนวนเพลง/ศิลปิน/เพลย์, ระยะเวลาฟังเฉลี่ย, connector ยอดนิยม, รายการล่าสุด พร้อมสถิติ Spotify (ถ้าเปิดไว้)
 
 **ตัวอย่าง Response:**
 
@@ -51,29 +96,43 @@
   "connectors": [{ "connector": "youtube", "plays": 160 }],
   "topArtists": [{ "artist": "IVE", "plays": 30 }],
   "recentScrobbles": [{ "artist": "David Guetta", "title": "Supernova Love" }],
-  "spotify": { "configured": true, "enrichment_rate": 82 }
+  "lastScrobble": "2025-01-08T10:00:00.000Z",
+  "spotify": {
+    "configured": true,
+    "enrichment_rate": 82,
+    "match_rate": 88,
+    "pending": 500
+  }
 }
 ```
 
 ---
 
-## 🎵 Tracks Management
+## Tracks Management
 
-### 2) GET `/api/tracks`
+### 4) GET `/api/tracks`
 
 **คำอธิบาย:** ดึงรายการเพลงทั้งหมดพร้อม pagination, sorting และ search
 
 **Query Parameters:**
 - `page` - เลขหน้า (default: 1)
 - `limit` - จำนวนต่อหน้า (default: 50, max: 100)
+- `offset` - offset สำหรับ skip
 - `sortBy` - เรียงตาม: `scrobbledAt`, `artist`, `title` (default: `scrobbledAt`)
 - `order` - ลำดับ: `asc` หรือ `desc` (default: `desc`)
-- `search` - ค้นหาจากชื่อเพลง, ศิลปิน, หรืออัลบั้ม
-- `range`, `offset`, `tz` - กรองตามช่วงเวลา
+- `search` - ค้นหาจากชื่อเพลง, ศิลปิน, หรืออัลบั้ม (general search)
+- `searchTitle` - ค้นหาเฉพาะชื่อเพลง
+- `searchArtist` - ค้นหาเฉพาะชื่อศิลปิน
+- `searchAlbum` - ค้นหาเฉพาะชื่ออัลบั้ม
+- `connector` - กรองตาม connector (e.g. youtube, spotify)
+- `source` - กรองตาม source
+- `range` - กรองตามช่วงเวลา (week, month, year, all-time)
+- `rangeOffset` - เลื่อนช่วงเวลา
 
 **ตัวอย่าง:**
 ```
 GET /api/tracks?page=1&limit=50&sortBy=scrobbledAt&order=desc&search=IVE
+GET /api/tracks?searchArtist=IVE&connector=youtube&range=month
 ```
 
 **Response:**
@@ -98,19 +157,19 @@ GET /api/tracks?page=1&limit=50&sortBy=scrobbledAt&order=desc&search=IVE
 }
 ```
 
-### 3) PATCH `/api/tracks`
+### 5) PATCH `/api/tracks`
 
-**คำอธิบาย:** อัปเดตสถานะ "Loved" ของเพลง
+**คำอธิบาย:** อัปเดตสถานะ "Loved" ของ scrobble
 
 **Request Body:**
 ```json
 {
-  "id": "<trackId>",
+  "id": "<scrobbleId>",
   "isLoved": true
 }
 ```
 
-**Response:** คืนค่า track object ที่อัปเดตแล้ว
+**Response:** คืนค่า updated scrobble object
 
 **ตัวอย่าง:**
 ```bash
@@ -119,42 +178,64 @@ curl -X PATCH https://your-api.com/api/tracks \
   -d '{"id": "507f1f77bcf86cd799439011", "isLoved": true}'
 ```
 
-### 4) DELETE `/api/tracks/range`
+### 6) DELETE `/api/tracks/range`
 
-**คำอธิบาย:** ลบเพลงทั้งหมดในช่วงวันที่ที่กำหนด
+**คำอธิบาย:** ลบ scrobbles ทั้งหมดในช่วงวันที่ที่กำหนด
 
 **Query Parameters:**
-- `startDate` - วันเริ่มต้น (ISO 8601 format)
-- `endDate` - วันสิ้นสุด (ISO 8601 format)
+- `start` - วันเริ่มต้น (ISO 8601 format, required)
+- `end` - วันสิ้นสุด (ISO 8601 format, required)
+- `source` - กรองตาม source (optional)
+- `connector` - กรองตาม connector (optional)
+- `dryRun` - preview โดยไม่ลบจริง (`true`/`false`)
 
 **ตัวอย่าง:**
 ```
-DELETE /api/tracks/range?startDate=2025-01-01&endDate=2025-01-07
+# Preview ก่อนลบ
+DELETE /api/tracks/range?start=2025-01-01&end=2025-01-07&dryRun=true
+
+# ลบเฉพาะ youtube connector
+DELETE /api/tracks/range?start=2025-01-01&end=2025-01-07&connector=youtube
 ```
 
-**Response:**
+**Response (Dry Run):**
 ```json
 {
   "success": true,
+  "message": "Dry run: ไม่ได้ลบข้อมูล",
+  "matches": 150,
+  "filter": {
+    "scrobbledAt": { "$gte": "2025-01-01T00:00:00.000Z", "$lte": "2025-01-07T23:59:59.999Z" }
+  }
+}
+```
+
+**Response (Actual Delete):**
+```json
+{
+  "success": true,
+  "message": "ลบข้อมูลสำเร็จ 150 รายการ",
   "deletedCount": 150,
-  "dateRange": {
+  "filter": { ... },
+  "requestedRange": {
     "start": "2025-01-01T00:00:00.000Z",
     "end": "2025-01-07T23:59:59.999Z"
-  }
+  },
+  "totalMatchedBeforeDelete": 150
 }
 ```
 
 ---
 
-## 🏆 Leaderboards & Rankings
+## Leaderboards & Rankings
 
-### 5) GET `/api/tracks/top-artists`
+### 7) GET `/api/tracks/top-artists`
 
 **คำอธิบาย:** ดึงรายการศิลปินยอดนิยมพร้อม metadata และรูปภาพ
 
 **Query Parameters:**
-- `range`, `offset`, `tz` - กรองตามช่วงเวลา
-- `limit` - จำนวนศิลปิน (default: 20, max: 100)
+- `range`, `offset` - กรองตามช่วงเวลา
+- `limit` - จำนวนศิลปิน (default: 10, max: 100)
 
 **ตัวอย่าง Response:**
 ```json
@@ -180,13 +261,13 @@ DELETE /api/tracks/range?startDate=2025-01-01&endDate=2025-01-07
 }
 ```
 
-### 6) GET `/api/tracks/top-tracks`
+### 8) GET `/api/tracks/top-tracks`
 
 **คำอธิบาย:** จัดอันดับเพลงยอดนิยมพร้อม metadata (track art/animation)
 
 **Query Parameters:**
-- `range`, `offset`, `tz` - กรองตามช่วงเวลา
-- `limit` - จำนวนเพลง (default: 20, max: 100)
+- `range`, `offset` - กรองตามช่วงเวลา
+- `limit` - จำนวนเพลง (default: 15, max: 100)
 
 **Response Structure:**
 ```json
@@ -211,9 +292,9 @@ DELETE /api/tracks/range?startDate=2025-01-01&endDate=2025-01-07
 
 ---
 
-## 🔍 Detailed Analytics
+## Detailed Analytics
 
-### 7) GET `/api/track`
+### 9) GET `/api/track`
 
 **คำอธิบาย:** วิเคราะห์เชิงลึกสำหรับเพลงเดียว
 
@@ -222,7 +303,7 @@ DELETE /api/tracks/range?startDate=2025-01-01&endDate=2025-01-07
 - `title` - ชื่อเพลง
 
 **Query Parameters (Optional):**
-- `recentLimit` - จำนวน scrobbles ล่าสุดที่จะดึง (default: 20)
+- `recentLimit` - จำนวน scrobbles ล่าสุดที่จะดึง (default: 12)
 - `tz` - timezone
 
 **ข้อมูลที่ได้รับ:**
@@ -238,7 +319,24 @@ DELETE /api/tracks/range?startDate=2025-01-01&endDate=2025-01-07
 GET /api/track?artist=IVE&title=HEYA&recentLimit=10
 ```
 
-### 8) GET `/api/albums`
+**Response:**
+```json
+{
+  "meta": {
+    "artist": "IVE",
+    "title": "HEYA",
+    "timezone": "Asia/Bangkok"
+  },
+  "summary": { ... },
+  "timeDistribution": { ... },
+  "breakdown": { ... },
+  "recentScrobbles": [ ... ],
+  "spotify": { ... },
+  "relatedTracks": [ ... ]
+}
+```
+
+### 10) GET `/api/albums`
 
 **คำอธิบาย:** วิเคราะห์ข้อมูลอัลบั้มเฉพาะ
 
@@ -247,7 +345,7 @@ GET /api/track?artist=IVE&title=HEYA&recentLimit=10
 - `album` - ชื่ออัลบั้ม
 
 **Query Parameters (Optional):**
-- `recentLimit` - จำนวน scrobbles ล่าสุด
+- `recentLimit` - จำนวน scrobbles ล่าสุด (default: 12)
 - `tz` - timezone
 
 **ข้อมูลที่ได้รับ:**
@@ -258,7 +356,12 @@ GET /api/track?artist=IVE&title=HEYA&recentLimit=10
 - Recent Scrobbles: รายการล่าสุด
 - Album Art: ภาพปกล่าสุด
 
-### 9) GET `/api/artists/:name`
+**ตัวอย่าง:**
+```
+GET /api/albums?artist=IVE&album=IVE SWITCH&recentLimit=10
+```
+
+### 11) GET `/api/artists/:name`
 
 **คำอธิบาย:** โปรไฟล์ศิลปินแบบละเอียด
 
@@ -268,7 +371,7 @@ GET /api/track?artist=IVE&title=HEYA&recentLimit=10
 **Query Parameters:**
 - `tz` - timezone
 - `limit` - จำนวน top tracks/albums (default: 10)
-- `recentLimit` - จำนวน scrobbles ล่าสุด (default: 20)
+- `recentLimit` - จำนวน scrobbles ล่าสุด (default: 15)
 
 **ข้อมูลที่ได้รับ:**
 - Summary: total plays, unique tracks, unique albums
@@ -284,165 +387,241 @@ GET /api/track?artist=IVE&title=HEYA&recentLimit=10
 GET /api/artists/NewJeans?limit=5&recentLimit=10
 ```
 
----
-
-## 🎧 Now Playing
-
-### 10) GET `/api/nowplaying`
-
-**คำอธิบาย:** ดึงข้อมูลสถานะกำลังเล่นปัจจุบัน (in-memory)
-
 **Response:**
 ```json
 {
-  "isPlaying": true,
-  "track": {
-    "artist": "IVE",
-    "title": "HEYA",
-    "album": "IVE SWITCH",
-    "trackArtUrl": "https://...",
-    "trackAnimationUrl": "https://...",
-    "duration": 180
-  },
-  "playback": {
-    "startedAt": "2025-01-31T10:00:00.000Z",
-    "currentPosition": 45,
-    "connector": "youtube"
-  }
+  "artist": "NewJeans",
+  "timezone": "Asia/Bangkok",
+  "summary": { ... },
+  "topTracks": [ ... ],
+  "topAlbums": [ ... ],
+  "connectorBreakdown": [ ... ],
+  "timeline": [ ... ],
+  "recentScrobbles": [ ... ],
+  "artistImage": "https://..."
 }
 ```
 
-**Use Case:** สำหรับแสดงผล "Now Playing" widget แบบ real-time
+---
 
-### 11) POST `/api/nowplaying/playing`
+## Now Playing
 
-**คำอธิบาย:** อัปเดตสถานะกำลังเล่นปัจจุบัน (manual refresh)
+### 12) GET `/api/nowplaying`
+
+**คำอธิบาย:** ดึงข้อมูลสถานะกำลังเล่นปัจจุบัน (in-memory)  
+รองรับ ETag / 304 Not Modified สำหรับ efficient polling
+
+**Headers:**
+- `If-None-Match` - ส่ง ETag จาก response ก่อนหน้า เพื่อรับ 304 เมื่อสถานะไม่เปลี่ยน
+
+**Response (Playing):**
+```json
+{
+  "playing": true,
+  "status": "playing",
+  "track": {
+    "title": "HEYA",
+    "artist": "IVE",
+    "album": "IVE SWITCH",
+    "trackArtUrl": "https://...",
+    "animationUrl": "https://...",
+    "appleMusicUrl": "https://..."
+  },
+  "trackArtUrl": "https://...",
+  "startedAt": "2025-01-31T10:00:00.000Z",
+  "updatedAt": "2025-01-31T10:05:00.000Z"
+}
+```
+
+**Response (Not Playing):**
+```json
+{
+  "playing": false,
+  "status": "idle",
+  "updatedAt": "2025-01-31T09:00:00.000Z",
+  "track": null
+}
+```
+
+### 13) POST `/api/nowplaying/playing`
+
+**คำอธิบาย:** อัปเดตสถานะกำลังเล่นปัจจุบัน (manual set/refresh)
 
 **Request Body:**
 ```json
 {
-  "artist": "IVE",
-  "title": "HEYA",
-  "album": "IVE SWITCH",
-  "currentPosition": 45,
-  "duration": 180,
-  "isPlaying": true,
-  "connector": "youtube"
+  "state": "playing",
+  "track": {
+    "title": "HEYA",
+    "artist": "IVE",
+    "album": "IVE SWITCH",
+    "trackArtUrl": "https://...",
+    "duration": 180
+  }
 }
 ```
+
+**State values:** `playing`, `paused`, `stopped`
 
 **Headers:**
 ```
 Content-Type: application/json
 ```
 
-**Response:** คืนค่า updated now playing status
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Now playing status updated to playing",
+  "playing": true,
+  "status": "playing",
+  "track": { ... },
+  "startedAt": "2025-01-31T10:00:00.000Z",
+  "updatedAt": "2025-01-31T10:00:00.000Z"
+}
+```
+
+**Additional:** เมื่อ state เป็น `playing` ระบบจะ fire-and-forget enrich Apple Music animated artwork ใน background
 
 ---
 
-## 📥 Import & Migration
+## Import & Migration
 
-### 12) GET `/import/listenbrainz`
+### 14) GET `/import/listenbrainz`
 
 **คำอธิบาย:** หน้าเว็บ UI สำหรับนำเข้าข้อมูลจาก ListenBrainz
 
 **Response:** HTML page พร้อมฟอร์มอัพโหลด
 
-### 13) POST `/api/import/listenbrainz`
+### 15) POST `/api/import/listenbrainz`
 
 **คำอธิบาย:** นำเข้าข้อมูล scrobbles จาก ListenBrainz export
 
-**Request Body:**
-- `Content-Type: multipart/form-data`
-- Field: `file` - JSON file จาก ListenBrainz export
+**Request Body:** รองรับหลายรูปแบบ
+- JSON array ของ ListenBrainz entries
+- Object ที่มี `entries` array
+- Object ที่มี `track_metadata` (single entry)
+- Object ที่มี `raw` field (JSON string หรือ JSON Lines)
+- Array โดยตรง
 
-**หรือ:**
-- `Content-Type: application/json`
-- Body: Array ของ ListenBrainz format entries
+**Headers:**
+```
+Content-Type: application/json
+```
 
 **Response:**
 ```json
 {
   "success": true,
-  "imported": 1500,
-  "skipped": 10,
+  "message": "นำเข้าข้อมูลสำเร็จ",
+  "total": 1500,
+  "processed": 1500,
+  "created": 1480,
+  "updated": 0,
+  "skipped": 20,
+  "ignored": 0,
+  "spotifyQueued": 1480,
   "errors": [],
-  "summary": {
-    "totalProcessed": 1510,
-    "duplicates": 10,
-    "newTracks": 1500
+  "items": {
+    "created": [
+      { "id": "...", "title": "HEYA", "artist": "IVE", "album": "IVE SWITCH", "timestamp": "...", "connector": "listenbrainz", "source": "listenbrainz", "trackArtUrl": "https://..." }
+    ],
+    "updated": [],
+    "skipped": [],
+    "ignored": []
   }
 }
 ```
 
-**ตัวอย่าง:**
-```bash
-curl -X POST https://your-api.com/api/import/listenbrainz \
-  -F "file=@listenbrainz-export.json"
-```
+**Note:** HTTP 207 Multi-Status เมื่อมีบางรายการ import สำเร็จแต่บางรายการมี error
 
 ---
 
-## 🔄 Duplicates Management
+## Duplicates Management
 
-### 14) GET `/api/duplicates`
+### 16) GET `/api/duplicates`
 
-**คำอธิบาย:** ดึงสถิติและรายการเพลงที่ซ้ำกัน
-
-**Query Parameters:**
-- `limit` - จำนวนรายการ duplicate groups (default: 50)
-- `threshold` - เวลาที่ใกล้กันถือว่าซ้ำ (วินาที, default: 300)
+**คำอธิบาย:** ดึงสถิติและรายการเพลงที่ซ้ำกัน (same artist, title, connector) แสดง top 20
 
 **Response:**
 ```json
 {
-  "totalDuplicates": 45,
-  "duplicateGroups": [
+  "duplicateGroups": 45,
+  "totalStats": {
+    "totalDuplicateGroups": 45,
+    "totalDuplicateTracks": 67
+  },
+  "topDuplicates": [
     {
-      "artist": "IVE",
-      "title": "HEYA",
-      "instances": [
-        {
-          "_id": "...",
-          "scrobbledAt": "2025-01-31T10:00:00.000Z",
-          "connector": "youtube"
-        },
-        {
-          "_id": "...",
-          "scrobbledAt": "2025-01-31T10:02:00.000Z",
-          "connector": "spotify"
-        }
-      ],
-      "count": 2
+      "_id": { "artist": "IVE", "title": "HEYA", "connector": "youtube" },
+      "count": 3,
+      "tracks": [
+        { "id": "...", "scrobbledAt": "2025-01-31T10:02:00.000Z", "eventType": "scrobble" },
+        { "id": "...", "scrobbledAt": "2025-01-31T10:00:00.000Z", "eventType": "scrobble" }
+      ]
     }
-  ]
+  ],
+  "endpoints": {
+    "removeDuplicates": "DELETE /api/duplicates?dryRun=true",
+    "removeDuplicatesForReal": "DELETE /api/duplicates"
+  }
 }
 ```
 
-### 15) DELETE `/api/duplicates`
+### 17) DELETE `/api/duplicates`
 
-**คำอธิบาย:** ลบเพลงที่ซ้ำกัน (เก็บเฉพาะรายการแรก)
+**คำอธิบาย:** ลบ scrobbles ที่ซ้ำกัน (เก็บเฉพาะรายการล่าสุด) — dupes ที่มี track, connector เดียวกัน และ scrobbledAt ห่างกันไม่เกิน 5 นาที
 
 **Query Parameters:**
-- `threshold` - เวลาที่ใกล้กันถือว่าซ้ำ (วินาที, default: 300)
-- `dryRun` - ทดสอบโดยไม่ลบจริง (true/false)
+- `dryRun` - preview โดยไม่ลบจริง (true/false, default: false)
+- `details` - แสดงรายละเอียดกลุ่มที่ซ้ำ (true/false)
 
-**Response:**
+**ตัวอย่าง:**
+```
+# Preview ก่อนลบ
+DELETE /api/duplicates?dryRun=true&details=true
+
+# ลบจริง
+DELETE /api/duplicates
+```
+
+**Response (Dry Run):**
 ```json
 {
   "success": true,
-  "duplicatesFound": 45,
-  "duplicatesRemoved": 45,
-  "duplicateGroups": [...],
-  "message": "Successfully removed 45 duplicate tracks"
+  "dryRun": true,
+  "duplicateGroups": 45,
+  "tracksToRemove": 67,
+  "duplicates": [
+    {
+      "trackId": "...",
+      "connector": "youtube",
+      "totalCount": 3,
+      "keepTrackId": "...",
+      "removeTrackIds": ["...", "..."],
+      "keepTrackDate": "2025-01-31T10:02:00.000Z"
+    }
+  ],
+  "message": "Found 67 duplicate tracks that would be removed"
+}
+```
+
+**Response (Actual Delete):**
+```json
+{
+  "success": true,
+  "dryRun": false,
+  "duplicateGroups": 45,
+  "tracksToRemove": 67,
+  "message": "Removed 67 duplicate tracks"
 }
 ```
 
 ---
 
-## 🎼 Spotify Integration
+## Spotify Integration
 
-### 16) GET `/api/spotify/status`
+### 18) GET `/api/spotify/status`
 
 **คำอธิบาย:** ตรวจสอบสถานะการเชื่อมต่อ Spotify
 
@@ -450,15 +629,18 @@ curl -X POST https://your-api.com/api/import/listenbrainz \
 ```json
 {
   "configured": true,
-  "hasCredentials": true,
-  "clientIdSet": true,
-  "clientSecretSet": true,
-  "tokenStatus": "valid",
-  "lastRefreshed": "2025-01-31T09:00:00.000Z"
+  "client_id_set": true,
+  "client_secret_set": true,
+  "audio_features_enabled": false,
+  "cache": {
+    "size": 150,
+    "maxSize": 1000
+  },
+  "message": "Spotify integration is configured and ready"
 }
 ```
 
-### 17) GET `/api/spotify/stats`
+### 19) GET `/api/spotify/stats`
 
 **คำอธิบาย:** สถิติการ enrich ข้อมูลจาก Spotify
 
@@ -466,103 +648,121 @@ curl -X POST https://your-api.com/api/import/listenbrainz \
 ```json
 {
   "total": 5000,
-  "enriched": 4100,
-  "notEnriched": 900,
-  "enrichmentRate": 82,
-  "lastEnrichment": "2025-01-31T08:00:00.000Z",
-  "breakdown": {
-    "hasSpotifyId": 4100,
-    "hasAlbumArt": 4050,
-    "hasPreviewUrl": 3800
+  "spotify_enriched": 4100,
+  "spotify_search_attempted": 4700,
+  "spotify_match_found": 4500,
+  "enrichment_rate_percent": 82,
+  "match_rate_percent": 96,
+  "pending_enrichment": 300,
+  "cache_stats": {
+    "size": 150,
+    "maxSize": 1000
   }
 }
 ```
 
-### 18) POST `/api/spotify/enrich`
+### 20) POST `/api/spotify/enrich`
 
-**คำอธิบาย:** Enrich เพลงทั้งหมดด้วยข้อมูล Spotify
+**คำอธิบาย:** Enrich tracks ด้วยข้อมูล Spotify (manual trigger)
 
 **Query Parameters:**
-- `limit` - จำนวนเพลงที่จะ enrich (default: 100)
-- `batchSize` - ขนาด batch (default: 50)
+- `limit` - จำนวน tracks ที่จะ enrich (default: 10, max: 50)
+- `force` - บังคับ re-enrich แม้มีข้อมูลอยู่แล้ว (`true`/`false`)
+
+**Response:**
+```json
+{
+  "message": "Spotify enrichment completed",
+  "processed": 50,
+  "enriched": 45,
+  "errors": 5,
+  "force_mode": false
+}
+```
+
+### 21) POST `/api/spotify/update-missing`
+
+**คำอธิบาย:** อัปเดตข้อมูล Spotify ที่ขาดหายไปใน tracks ที่มีอยู่
+
+**Query Parameters:**
+- `limit` - จำนวน tracks ที่จะอัปเดต (default: 50, max: 100)
+- `missingOnly` - อัปเดตเฉพาะ tracks ที่ขาดข้อมูลพื้นฐาน (`true`/`false`)
+- `force` - บังคับอัปเดตทั้งหมดโดยไม่เช็ค condition (`true`/`false`)
+- `priority` - fields ที่ต้องการให้ priority (comma-separated, default: `duration,album,year`)
 
 **Response:**
 ```json
 {
   "success": true,
+  "message": "Spotify data update completed",
   "processed": 100,
-  "enriched": 92,
-  "failed": 8,
-  "progress": {
-    "total": 5000,
-    "completed": 4192
-  }
-}
-```
-
-### 19) POST `/api/spotify/update-missing`
-
-**คำอธิบาย:** อัปเดตข้อมูล Spotify ที่ขาดหายไปในเพลงที่มีอยู่
-
-**Query Parameters:**
-- `limit` - จำนวนเพลงที่จะอัปเดต
-- `force` - บังคับอัปเดตแม้มีข้อมูลอยู่แล้ว (true/false)
-
-**Response:**
-```json
-{
-  "success": true,
-  "totalProcessed": 150,
-  "updated": 145,
-  "skipped": 5,
-  "errors": []
-}
-```
-
-### 20) DELETE `/api/spotify/cache`
-
-**คำอธิบาย:** ล้าง cache ของ Spotify service
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Spotify cache cleared successfully"
-}
-```
-
----
-
-## ⚕️ Health & System
-
-### 21) GET `/health` หรือ `/api/health`
-
-**คำอธิบาย:** ตรวจสอบสถานะระบบ
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "timestamp": "2025-01-31T10:00:00.000Z",
-  "uptime": 86400,
-  "database": {
-    "connected": true,
-    "responseTime": 15
+  "enriched": 85,
+  "no_match": 10,
+  "errors": 5,
+  "fields_updated": {
+    "duration": 50,
+    "album": 30,
+    "year": 25,
+    "trackNumber": 15
   },
-  "memory": {
-    "used": 256,
-    "total": 512
+  "updated_fields_summary": "duration: 50, album: 30, year: 25, trackNumber: 15",
+  "query_options": {
+    "limit": 100,
+    "missing_data_only": true,
+    "force_update": false,
+    "priority_fields": "duration,album,year"
   }
+}
+```
+
+### 22) DELETE `/api/spotify/cache`
+
+**คำอธิบาย:** ล้าง search cache ของ Spotify service
+
+**Response:**
+```json
+{
+  "message": "Spotify cache cleared",
+  "cleared_entries": 150
 }
 ```
 
 ---
 
-## 🌐 Webhook Endpoints
+## Health & System
 
-### 22) POST `/webhook/scrobble`
+### 23) GET `/health` หรือ `/api/health`
 
-**คำอธิบาย:** รับข้อมูล scrobble จาก external services
+**คำอธิบาย:** ตรวจสอบสถานะระบบและ database connectivity
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "timestamp": "2025-01-31T10:00:00.000Z",
+  "database": "connected",
+  "version": "1.0.0",
+  "uptime": 86400
+}
+```
+
+**Error Response (database down):**
+```json
+{
+  "status": "unhealthy",
+  "timestamp": "2025-01-31T10:00:00.000Z",
+  "database": "disconnected",
+  "error": "Connection timeout"
+}
+```
+
+---
+
+## Webhook Endpoints
+
+### 24) POST `/webhook/scrobble`
+
+**คำอธิบาย:** รับข้อมูลจาก external services รองรับ Web Scrobbler, ListenBrainz และ custom format
 
 **Request Body:** รองรับหลายรูปแบบ
 - Web Scrobbler format
@@ -575,28 +775,127 @@ Content-Type: application/json
 User-Agent: <connector-name>
 ```
 
+**Event Types & Responses:**
+
+#### `nowplaying` — แจ้งว่ากำลังเล่น (ไม่นับเป็น scrobble)
+```json
+{
+  "success": true,
+  "message": "Now playing updated",
+  "nowPlaying": { "playing": true, "track": { ... } },
+  "track": { "title": "HEYA", "artist": "IVE", "album": "IVE SWITCH" }
+}
+```
+
+#### `paused` / `stopped` — อัปเดต now playing state โดยไม่บันทึก scrobble
+```json
+{
+  "success": true,
+  "action": "ignored",
+  "message": "Now playing paused",
+  "nowPlaying": { "playing": false, "status": "paused", ... },
+  "track": { "title": "HEYA", "artist": "IVE" }
+}
+```
+
+#### `scrobble` — บันทึกเป็น scrobble ใหม่
+```json
+{
+  "success": true,
+  "action": "created",
+  "scrobble": {
+    "_id": "...",
+    "track": "...",
+    "scrobbledAt": "2025-01-31T10:00:00.000Z",
+    "source": "web-scrobbler",
+    "connector": "youtube",
+    "eventType": "scrobble"
+  },
+  "message": "Scrobble received successfully"
+}
+```
+
+#### Duplicate (ถูกข้าม)
+```json
+{
+  "success": true,
+  "action": "skipped",
+  "message": "Duplicate scrobble skipped",
+  "track": { "title": "HEYA", "artist": "IVE" }
+}
+```
+
+### 25) POST `/webhook`
+
+**คำอธิบาย:** Alias ของ `/webhook/scrobble` — พฤติกรรมเหมือนกันทุกประการ
+
+---
+
+## Migration
+
+### 26) GET `/migrate`
+
+**คำอธิบาย:** หน้าเว็บ UI สำหรับ migrate ข้อมูลจาก collection `tracks` เดิม → normalized schema (Artist, Album, TrackMeta, Scrobble)
+
+**Response:** HTML page
+
+### 27) GET `/inspect`
+
+**คำอธิบาย:** หน้าเว็บ UI สำหรับ inspect ข้อมูลใน database
+
+**Response:** HTML page
+
+### 28) GET `/api/migrate/precheck`
+
+**คำอธิบาย:** เช็คจำนวน documents ใน old tracks collection เทียบกับ new normalized collections
+
 **Response:**
 ```json
 {
   "success": true,
-  "message": "Scrobble recorded successfully",
-  "track": {
-    "_id": "...",
-    "artist": "IVE",
-    "title": "HEYA"
+  "counts": {
+    "oldTracks": 5000,
+    "artists": 120,
+    "albums": 200,
+    "trackMetas": 310,
+    "scrobbles": 0
   }
 }
 ```
 
-### 23) POST `/webhook`
+### 29) POST `/api/migrate/run`
 
-**คำอธิบาย:** Generic webhook endpoint (alias ของ `/webhook/scrobble`)
+**คำอธิบาย:** รัน migration จาก `tracks` → normalized schema แบบ streaming (NDJSON)
+
+**Request Body:**
+```json
+{
+  "dryRun": true
+}
+```
+
+`dryRun` — ถ้า `true` (default) จะ simulate โดยไม่เขียนลง database จริง
+
+**Headers:**
+```
+Content-Type: application/json
+```
+
+**Response:** Streaming NDJSON (application/x-ndjson)
+
+```
+{"type":"start","total":5000}
+{"type":"progress","processed":300,"total":5000,"pct":"6.0","artists":50,"albums":80,"trackMetas":120,"scrobbles":300,"errors":0}
+{"type":"progress","processed":600,"total":5000,"pct":"12.0","artists":90,"albums":150,"trackMetas":200,"scrobbles":600,"errors":0}
+...
+{"type":"done","total":5000,"processed":5000,"artists":120,"albums":200,"trackMetas":310,"scrobbles":5000,"errors":5}
+```
 
 ---
 
-## 📝 Notes
+## Notes
 
-> **Rate Limiting:** ทุก endpoint มี rate limit ป้องกันการใช้งานมากเกินไป
+> **Rate Limiting:** ทุก endpoint มี rate limit ป้องกันการใช้งานมากเกินไป (1000 req/15min ทั่วไป, 100 req/min สำหรับ `/webhook`)
 >
 > **Authentication:** ปัจจุบันไม่ต้องการ API key แต่สามารถเพิ่ม middleware `validateApiKey` ได้
 >
@@ -613,16 +912,21 @@ User-Agent: <connector-name>
 
 ---
 
-## 🚀 Quick Start Examples
+## Quick Start Examples
 
 ### ดึงสถิติสัปดาห์นี้
 ```bash
 curl "https://your-api.com/api/stats?range=week"
 ```
 
-### ค้นหาเพลงของ IVE
+### ค้นหาเพลงของ IVE (general search)
 ```bash
 curl "https://your-api.com/api/tracks?search=IVE&limit=20"
+```
+
+### ค้นหาเฉพาะชื่อศิลปิน
+```bash
+curl "https://your-api.com/api/tracks?searchArtist=IVE&connector=youtube&range=month"
 ```
 
 ### ดูข้อมูลเพลงเฉพาะ
@@ -633,6 +937,18 @@ curl "https://your-api.com/api/track?artist=IVE&title=HEYA"
 ### ดู Top Artists เดือนนี้
 ```bash
 curl "https://your-api.com/api/tracks/top-artists?range=month&limit=10"
+```
+
+### ส่ง now playing status
+```bash
+curl -X POST "https://your-api.com/api/nowplaying/playing" \
+  -H "Content-Type: application/json" \
+  -d '{"state":"playing","track":{"title":"HEYA","artist":"IVE","album":"IVE SWITCH"}}'
+```
+
+### Preview ก่อนลบ duplicates
+```bash
+curl "https://your-api.com/api/duplicates?dryRun=true&details=true"
 ```
 
 ### ส่ง scrobble ใหม่
@@ -647,7 +963,12 @@ curl -X POST "https://your-api.com/webhook/scrobble" \
   }'
 ```
 
+### Preview ก่อนลบ tracks ตามช่วงวันที่
+```bash
+curl -X DELETE "https://your-api.com/api/tracks/range?start=2025-01-01&end=2025-01-31&dryRun=true"
+```
+
 ---
 
-**Last Updated:** 2025-11-27  
-**API Version:** 1.0
+**Last Updated:** 2026-05-10  
+**API Version:** 1.0.2

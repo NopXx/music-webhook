@@ -24,7 +24,7 @@ class SystemController {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         database: 'connected',
-        version: '1.0.0',
+        version: '1.0.2',
         uptime: process.uptime()
       });
 
@@ -44,33 +44,39 @@ class SystemController {
   handleRoot(req, res) {
     const welcomeMessage = {
       message: 'Music Webhook Server',
-      version: '1.0.0',
+      version: '1.0.2',
       framework: 'Express.js + Bun.js',
       features: [
         'Multiple webhook formats (Web Scrobbler, ListenBrainz, custom JSON)',
         'Duplicate prevention & Spotify enrichment queue',
         'In-memory Now Playing state with refresh endpoints',
-        'ListenBrainz bulk import UI + API'
+        'ListenBrainz bulk import UI + API',
+        'Data migration from legacy tracks collection to normalized schema'
       ],
       endpoints: {
+        info: {
+          'GET /': 'This welcome message',
+          'GET /api': 'Dynamic JSON listing of all API endpoints',
+          'GET /health': 'Health check (alias of /api/health)'
+        },
         webhook: {
-          'POST /webhook/scrobble': 'Receive scrobble data from clients (Web Scrobbler, ListenBrainz import payloads)',
+          'POST /webhook/scrobble': 'Receive scrobble data from clients (Web Scrobbler, ListenBrainz import payloads) — supports event types: scrobble, nowplaying, paused, stopped',
           'POST /webhook': 'Alternative scrobble endpoint'
         },
         nowPlaying: {
-          'GET /api/nowplaying': 'Get current in-memory Now Playing snapshot',
-          'POST /api/nowplaying/playing': 'Set or refresh Now Playing status (supports playing/paused/stopped)'
+          'GET /api/nowplaying': 'Get current in-memory Now Playing snapshot (supports ETag/304)',
+          'POST /api/nowplaying/playing': 'Set Now Playing status — body: { state: "playing"|"paused"|"stopped", track: { title, artist, ... } }'
         },
         listeningData: {
-        'GET /api/tracks?page=1&limit=50': 'List tracks with pagination/search',
-        'PATCH /api/tracks': 'Update loved flag for a track (body: { id, isLoved })',
-        'GET /api/tracks/top-artists?range=week': 'Top artists leaderboard',
-        'GET /api/tracks/top-tracks?range=week': 'Top tracks leaderboard',
-        'GET /api/track?artist=<name>&title=<title>': 'Single track analytics',
-        'GET /api/albums?artist=<name>&album=<album>': 'Album analytics overview',
-        'GET /api/artists/:name': 'Artist profile + timeline',
-          'DELETE /api/tracks/range?start=<ISO>&end=<ISO>&dryRun=true': 'Delete tracks within a scrobbledAt date range (optional source/connector filters)',
           'GET /api/stats': 'Aggregate listening statistics',
+          'GET /api/tracks?page=1&limit=50': 'List tracks with pagination/search (params: search, searchTitle, searchArtist, searchAlbum, connector, source, range, rangeOffset)',
+          'PATCH /api/tracks': 'Update loved flag for a track (body: { id, isLoved })',
+          'GET /api/tracks/top-artists?range=week': 'Top artists leaderboard',
+          'GET /api/tracks/top-tracks?range=week': 'Top tracks leaderboard',
+          'GET /api/track?artist=<name>&title=<title>': 'Single track analytics',
+          'GET /api/albums?artist=<name>&album=<album>': 'Album analytics overview',
+          'GET /api/artists/:name': 'Artist profile + timeline',
+          'DELETE /api/tracks/range?start=<ISO>&end=<ISO>&dryRun=true': 'Delete tracks within a scrobbledAt date range (optional source/connector filters)',
           'GET /api/health': 'Health check endpoint'
         },
         import: {
@@ -85,15 +91,22 @@ class SystemController {
         spotify: {
           'GET /api/spotify/status': 'Spotify integration status',
           'GET /api/spotify/stats': 'Spotify enrichment statistics',
-          'POST /api/spotify/enrich?limit=10&force=true': 'Manual Spotify enrichment',
-          'POST /api/spotify/update-missing?limit=50&missingOnly=true': 'Fill missing metadata using Spotify',
+          'POST /api/spotify/enrich?limit=10&force=true': 'Manual Spotify enrichment (max 50, force to re-enrich all)',
+          'POST /api/spotify/update-missing?limit=50&missingOnly=true': 'Fill missing metadata using Spotify (params: limit, missingOnly, force, priority)',
           'DELETE /api/spotify/cache': 'Clear Spotify search cache'
+        },
+        migration: {
+          'GET /migrate': 'Migration UI page',
+          'GET /inspect': 'Track inspection UI page',
+          'GET /api/migrate/precheck': 'Count documents in old vs new collections',
+          'POST /api/migrate/run': 'Run migration (streaming NDJSON) — body: { dryRun: boolean }'
         }
       },
       notes: [
         'Use dryRun=true when deleting or deduplicating to preview the impact',
         'ListenBrainz imports automatically queue Spotify enrichment when configured',
-        'Send POST requests to /webhook/scrobble with validated payloads to record new tracks'
+        'Send POST requests to /webhook/scrobble with validated payloads to record new tracks',
+        'Webhook supports nowplaying/paused/stopped events — these update in-memory state without creating scrobbles'
       ]
     };
 

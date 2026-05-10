@@ -163,7 +163,7 @@ class MusicWebhookServer {
     this.app.get('/api', (req, res) => {
       res.json({
         message: 'Music Webhook API',
-        version: '1.0.0',
+        version: '1.0.2',
         endpoints: {
           'GET /api/stats': 'Get scrobbling statistics',
           'GET /api/tracks': 'Get tracks with pagination/search',
@@ -184,7 +184,11 @@ class MusicWebhookServer {
           'GET /api/spotify/stats': 'Get Spotify enrichment statistics',
           'POST /api/spotify/enrich': 'Manually enrich tracks with Spotify data',
           'POST /api/spotify/update-missing': 'Update missing Spotify data for existing tracks',
-          'DELETE /api/spotify/cache': 'Clear Spotify search cache'
+          'DELETE /api/spotify/cache': 'Clear Spotify search cache',
+          'GET /api/duplicates': 'Get duplicate scrobble statistics',
+          'DELETE /api/duplicates': 'Remove duplicate scrobbles',
+          'GET /api/migrate/precheck': 'Pre-check migration counts',
+          'POST /api/migrate/run': 'Run data migration (streaming NDJSON)'
         }
       });
     });
@@ -199,11 +203,18 @@ class MusicWebhookServer {
         timestamp: new Date().toISOString(),
         availableEndpoints: [
           'GET /',
+          'GET /api',
           'GET /api/health',
+          'GET /health',
           'GET /api/stats', 
           'GET /api/tracks',
           'GET /api/nowplaying',
-          'POST /webhook/scrobble'
+          'GET /api/duplicates',
+          'POST /webhook/scrobble',
+          'GET /api/spotify/status',
+          'GET /api/tracks/top-artists',
+          'GET /api/tracks/top-tracks',
+          'GET /api/migrate/precheck'
         ]
       });
     });
@@ -246,13 +257,16 @@ class MusicWebhookServer {
       const server = this.app.listen(PORT, () => {
         console.log(`🚀 Music Webhook Server running at PORT :${PORT}`);
         console.log(`📋 Available endpoints:`);
+        console.log(`   GET  /            - Welcome & API overview`);
+        console.log(`   GET  /api         - Dynamic endpoint listing`);
+        console.log(`   GET  /health      - Health check`);
         console.log(`   POST /webhook/scrobble - Receive scrobble data`);
-        console.log(`   GET  /api/stats - Get statistics`);
-        console.log(`   GET  /api/tracks - Get recent tracks`);
-        console.log(`   GET  /api/nowplaying - Get now playing status`);
-        console.log(`   POST /api/nowplaying/playing - Update now playing status`);
-        console.log(`   GET  /api/health - Health check`);
-        console.log(`   GET  / - API documentation`);
+        console.log(`   GET  /api/stats   - Get statistics`);
+        console.log(`   GET  /api/tracks  - Get recent tracks`);
+        console.log(`   GET  /api/nowplaying   - Get now playing status`);
+        console.log(`   GET  /api/spotify/status - Spotify integration status`);
+        console.log(`   GET  /api/duplicates     - Duplicate track stats`);
+        console.log(`   GET  /api/migrate/precheck - Migration pre-check`);
         console.log('');
         console.log('🎵 Ready to receive scrobble data from web-scrobbler!');
         console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
