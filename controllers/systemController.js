@@ -43,7 +43,7 @@ class SystemController {
    */
   handleRoot(req, res) {
     const welcomeMessage = {
-      message: 'Music Webhook Server',
+      message: 'Music Webhook Server on Docker',
       version: '1.0.2',
       framework: 'Express.js + Bun.js',
       features: [
