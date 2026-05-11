@@ -19,8 +19,10 @@ jobs:
           key: ${{ vars.SSH_KEY }}
 
           script: |
-            cd ~/apps
+            cd ~/apps/musis-webhook
 
             git pull
+
+            cd ..
 
             docker compose up -d --build webhook
