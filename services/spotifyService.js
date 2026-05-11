@@ -1,5 +1,5 @@
 import axios from 'axios';
-import Cache from '../models/Cache.js';
+import cacheRepo from './cacheRepo.js';
 
 class SpotifyService {
   constructor() {
@@ -64,15 +64,10 @@ class SpotifyService {
   async searchTrack(artist, title) {
     const cacheKey = this.createCacheKey(artist, title);
     
-    try {
-      // ตรวจสอบ cache จาก DB
-      const cached = await Cache.findOne({ key: cacheKey });
-      if (cached) {
-        console.log(`🗄️ Spotify cache hit (DB): ${artist} - ${title}`);
-        return cached.data;
-      }
-    } catch (err) {
-      console.error('⚠️ Cache read error:', err.message);
+    const cached = await cacheRepo.get(cacheKey);
+    if (cached !== undefined) {
+      console.log(`🗄️ Spotify cache hit: ${artist} - ${title}`);
+      return cached;
     }
 
     const token = await this.getAccessToken();
@@ -159,18 +154,7 @@ class SpotifyService {
   }
 
   async saveToCache(key, data, ttl) {
-    try {
-      await Cache.findOneAndUpdate(
-        { key },
-        { 
-          data, 
-          expiresAt: new Date(Date.now() + ttl) 
-        },
-        { upsert: true, new: true }
-      );
-    } catch (err) {
-      console.error('⚠️ Cache write error:', err.message);
-    }
+    await cacheRepo.set(key, data, ttl);
   }
 
   // สร้าง search query ที่ดี
@@ -375,27 +359,18 @@ class SpotifyService {
 
   // ล้าง cache
   async clearCache() {
-    try {
-      await Cache.deleteMany({ key: /^spotify:/ });
-      console.log('🗑️ Spotify cache cleared (DB)');
-    } catch (err) {
-      console.error('❌ Failed to clear Spotify cache:', err.message);
-    }
+    await cacheRepo.del('spotify:*');
+    console.log('🗑️ Spotify cache cleared');
   }
 
-  // ดู cache statistics
   async getCacheStats() {
-    try {
-      const count = await Cache.countDocuments({ key: /^spotify:/ });
-      return {
-        size: count,
-        type: 'mongodb',
-        isConfigured: this.isConfigured(),
-        hasValidToken: !!(this.accessToken && this.tokenExpiresAt && Date.now() < this.tokenExpiresAt)
-      };
-    } catch (err) {
-      return { error: err.message };
-    }
+    const size = await cacheRepo.count('spotify:.*');
+    return {
+      size,
+      type: process.env.REDIS_URL ? 'redis+mongodb' : 'mongodb',
+      isConfigured: this.isConfigured(),
+      hasValidToken: !!(this.accessToken && this.tokenExpiresAt && Date.now() < this.tokenExpiresAt)
+    };
   }
 }
 

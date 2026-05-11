@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import redis from '../config/redis.js';
 import Artist from './Artist.js';
 import Album from './Album.js';
 import TrackMeta from './TrackMeta.js';
@@ -138,6 +139,17 @@ scrobbleSchema.index({ eventType: 1 });
  * @returns {Promise<boolean>}
  */
 scrobbleSchema.statics.isRecentDuplicate = async function (trackMetaId, timestamp, windowMs = 300000) {
+  if (redis?.status === 'ready') {
+    try {
+      const key = `dedup:scrobble:${trackMetaId}`;
+      const ttlSec = Math.ceil(windowMs / 1000);
+      const result = await redis.set(key, '1', 'NX', 'EX', ttlSec);
+      return result === null; // null = key existed = duplicate
+    } catch {
+      // Redis failed, fall through to Mongo
+    }
+  }
+
   const ts = new Date(timestamp);
   const start = new Date(ts.getTime() - windowMs);
 

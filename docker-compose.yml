@@ -11,10 +11,12 @@ services:
       - PORT=3000
       - HOST=0.0.0.0
       - MONGODB_URI=mongodb://mongodb:27017/music-scrobbler
+      - REDIS_URL=redis://redis:6379
       - API_KEY=${API_KEY:-default-api-key}
       - NODE_ENV=production
     depends_on:
       - mongodb
+      - redis
     restart: unless-stopped
     volumes:
       - ./logs:/app/logs
@@ -55,8 +57,23 @@ services:
     networks:
       - music-webhook-network
 
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: music-webhook-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - music-webhook-network
+    command: redis-server --save 60 1 --loglevel warning
+
 volumes:
   mongodb_data:
+    driver: local
+  redis_data:
     driver: local
 
 networks:

@@ -6,6 +6,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import Database from './config/database.js';
+import redis from './config/redis.js';
+import nowPlayingService from './services/nowPlayingService.js';
 import webhookRoutes from './routes/webhook.js';
 import { 
   validateTrackData, 
@@ -253,6 +255,9 @@ class MusicWebhookServer {
       console.log('🔌 Connecting to MongoDB...');
       await Database.connect();
 
+      // Restore now-playing state from Redis
+      await nowPlayingService.hydrate();
+
       // Start the server
       const server = this.app.listen(PORT, () => {
         console.log(`🚀 Music Webhook Server running at PORT :${PORT}`);
@@ -306,6 +311,12 @@ const gracefulShutdown = async (signal, server) => {
 
     // Close database connection
     await Database.disconnect();
+
+    // Close Redis connection
+    if (redis) {
+      await redis.quit().catch(() => {});
+      console.log('✅ Redis connection closed');
+    }
     
     console.log('✅ Server shutdown complete');
     process.exit(0);

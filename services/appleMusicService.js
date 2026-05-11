@@ -1,43 +1,23 @@
 
-import Cache from '../models/Cache.js';
+import cacheRepo from './cacheRepo.js';
 
 class AppleMusicService {
   constructor() {
     this.cacheTimeout = 30 * 24 * 60 * 60 * 1000; // 30 days
   }
 
-  // Helper methods for caching
   createCacheKey(type, ...parts) {
     const rawKey = parts.map(p => (p || '').toString().toLowerCase().trim()).join('|');
     return `apple:${type}:${rawKey}`;
   }
 
   async checkCache(key) {
-    try {
-      const cached = await Cache.findOne({ key });
-      if (cached) {
-        // console.log(`🗄️ Apple Music cache hit: ${key}`);
-        return cached.data;
-      }
-    } catch (err) {
-      console.error('⚠️ Cache read error:', err.message);
-    }
-    return null;
+    const val = await cacheRepo.get(key);
+    return val !== undefined ? val : null;
   }
 
   async saveToCache(key, data, ttl = this.cacheTimeout) {
-    try {
-      await Cache.findOneAndUpdate(
-        { key },
-        { 
-          data, 
-          expiresAt: new Date(Date.now() + ttl) 
-        },
-        { upsert: true, new: true }
-      );
-    } catch (err) {
-      console.error('⚠️ Cache write error:', err.message);
-    }
+    await cacheRepo.set(key, data, ttl);
   }
 
   /**

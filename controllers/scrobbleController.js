@@ -47,13 +47,12 @@ class ScrobbleController {
           const version = nowPlayingService.getVersion();
           appleMusicService.fetchAnimatedArtwork(trackData.title, trackData.artist, trackData.album || '')
             .then(result => {
-              if (nowPlayingService.getVersion() !== version) return; // State changed, discard
+              if (nowPlayingService.getVersion() !== version) return;
               if (result.success && result.animationUrl && nowPlayingService.current?.track) {
-                nowPlayingService.current.track.animationUrl = result.animationUrl;
-                if (result.appleMusicUrl) {
-                  nowPlayingService.current.track.appleMusicUrl = result.appleMusicUrl;
-                }
-                nowPlayingService._invalidateCache();
+                nowPlayingService.attachEnrichment({
+                  animationUrl: result.animationUrl,
+                  appleMusicUrl: result.appleMusicUrl,
+                });
               }
             })
             .catch(err => {

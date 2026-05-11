@@ -1,4 +1,8 @@
 // Optimized in-memory Now Playing state manager
+import redis from '../config/redis.js';
+
+const REDIS_KEY = 'nowplaying:state';
+const REDIS_TTL = 86400; // 1 day
 
 class NowPlayingService {
   constructor() {
@@ -6,6 +10,43 @@ class NowPlayingService {
     this._version = 0;   // monotonic counter for race-condition guards
     this._cachedStatus = null;
     this._cachedAt = 0;
+  }
+
+  async hydrate() {
+    if (!redis || redis.status !== 'ready') return;
+    try {
+      const raw = await redis.get(REDIS_KEY);
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      if (state.current) {
+        if (state.current.startedAt) state.current.startedAt = new Date(state.current.startedAt);
+        if (state.current.lastUpdate) state.current.lastUpdate = new Date(state.current.lastUpdate);
+        const age = Date.now() - (state.current.lastUpdate?.getTime() || 0);
+        if (age > 10 * 60 * 1000) {
+          console.log('ℹ️ NowPlaying state too stale — starting idle');
+          return;
+        }
+        this.current = state.current;
+        this._version = state._version || 0;
+        console.log(`♻️ NowPlaying restored from Redis (v${this._version})`);
+      }
+    } catch (err) {
+      console.warn('⚠️ NowPlaying hydration failed:', err.message);
+    }
+  }
+
+  _persist() {
+    if (!redis || redis.status !== 'ready') return;
+    const payload = JSON.stringify({ current: this.current, _version: this._version });
+    redis.set(REDIS_KEY, payload, 'EX', REDIS_TTL).catch(() => {});
+  }
+
+  attachEnrichment({ animationUrl, appleMusicUrl }) {
+    if (!this.current?.track) return;
+    if (animationUrl) this.current.track.animationUrl = animationUrl;
+    if (appleMusicUrl) this.current.track.appleMusicUrl = appleMusicUrl;
+    this._invalidateCache();
+    this._persist();
   }
 
   /** Return current version — used by enrichment callbacks to detect stale results */
@@ -18,6 +59,7 @@ class NowPlayingService {
     this.current = null;
     this._version++;
     this._invalidateCache();
+    this._persist();
   }
 
   // Normalize minimal track info from webhook trackData
@@ -85,6 +127,7 @@ class NowPlayingService {
     };
     this._version++;
     this._invalidateCache();
+    this._persist();
   }
 
   setPaused(trackData) {
@@ -110,6 +153,7 @@ class NowPlayingService {
     };
     this._version++;
     this._invalidateCache();
+    this._persist();
   }
 
   setStopped(trackData) {
@@ -134,6 +178,7 @@ class NowPlayingService {
     };
     this._version++;
     this._invalidateCache();
+    this._persist();
   }
 
   // Refresh current state as playing, optionally with new progress/duration
@@ -163,6 +208,7 @@ class NowPlayingService {
     }
     this._version++;
     this._invalidateCache();
+    this._persist();
   }
 
   // Force set playing with provided track data
