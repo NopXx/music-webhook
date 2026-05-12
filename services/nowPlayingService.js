@@ -1,15 +1,33 @@
-// Optimized in-memory Now Playing state manager
+// Multi-source Now Playing state manager
+// Each scrobbler source (web-scrobbler, listenbrainz, custom apps, ...) keeps
+// its own slot in `this.sources`. A single "primary" source is surfaced through
+// `getStatus()` / `current`, chosen with a sticky policy so concurrent
+// scrobblers don't flicker the displayed track.
 import redis from '../config/redis.js';
 
 const REDIS_KEY = 'nowplaying:state';
-const REDIS_TTL = 86400; // 1 day
+const REDIS_TTL = 86400;                // 1 day Redis TTL
+const STALE_MS = 60 * 1000;             // heartbeat window for "active"
+const CLEANUP_MS = 30 * 60 * 1000;      // drop a source after this idle
+const HYDRATE_STALE_MS = 10 * 60 * 1000;
 
 class NowPlayingService {
   constructor() {
-    this.current = null; // { track, status, startedAt, lastUpdate, progress }
-    this._version = 0;   // monotonic counter for race-condition guards
+    this.sources = new Map();       // sourceKey -> sourceState
+    this._primaryKey = null;
+    this._version = 0;
     this._cachedStatus = null;
     this._cachedAt = 0;
+  }
+
+  /** Backwards-compat getter — many callers read `service.current?.track` */
+  get current() {
+    return this._primaryKey ? (this.sources.get(this._primaryKey) || null) : null;
+  }
+
+  _sourceKey(trackData) {
+    const d = trackData || {};
+    return String(d.source || d.connector || 'unknown').toLowerCase();
   }
 
   async hydrate() {
@@ -18,17 +36,48 @@ class NowPlayingService {
       const raw = await redis.get(REDIS_KEY);
       if (!raw) return;
       const state = JSON.parse(raw);
+
+      const reviveEntry = (entry) => {
+        if (!entry) return null;
+        if (entry.startedAt) entry.startedAt = new Date(entry.startedAt);
+        if (entry.lastUpdate) entry.lastUpdate = new Date(entry.lastUpdate);
+        return entry;
+      };
+
+      // New format: { sources: [[k,v],...], _primaryKey, _version }
+      if (Array.isArray(state.sources)) {
+        const now = Date.now();
+        for (const [key, entry] of state.sources) {
+          const revived = reviveEntry(entry);
+          if (!revived) continue;
+          const age = now - (revived.lastUpdate?.getTime() || 0);
+          if (age > HYDRATE_STALE_MS) continue;
+          this.sources.set(key, revived);
+        }
+        this._primaryKey = state._primaryKey && this.sources.has(state._primaryKey)
+          ? state._primaryKey
+          : null;
+        this._version = state._version || 0;
+        if (this.sources.size > 0) {
+          this._recomputePrimary();
+          console.log(`♻️ NowPlaying restored ${this.sources.size} source(s) from Redis (v${this._version})`);
+        }
+        return;
+      }
+
+      // Legacy format: { current, _version }
       if (state.current) {
-        if (state.current.startedAt) state.current.startedAt = new Date(state.current.startedAt);
-        if (state.current.lastUpdate) state.current.lastUpdate = new Date(state.current.lastUpdate);
-        const age = Date.now() - (state.current.lastUpdate?.getTime() || 0);
-        if (age > 10 * 60 * 1000) {
+        const revived = reviveEntry(state.current);
+        const age = Date.now() - (revived.lastUpdate?.getTime() || 0);
+        if (age > HYDRATE_STALE_MS) {
           console.log('ℹ️ NowPlaying state too stale — starting idle');
           return;
         }
-        this.current = state.current;
+        const key = String(revived.source || 'unknown').toLowerCase();
+        this.sources.set(key, revived);
+        this._primaryKey = key;
         this._version = state._version || 0;
-        console.log(`♻️ NowPlaying restored from Redis (v${this._version})`);
+        console.log(`♻️ NowPlaying restored (legacy) from Redis (v${this._version})`);
       }
     } catch (err) {
       console.warn('⚠️ NowPlaying hydration failed:', err.message);
@@ -37,34 +86,118 @@ class NowPlayingService {
 
   _persist() {
     if (!redis || redis.status !== 'ready') return;
-    const payload = JSON.stringify({ current: this.current, _version: this._version });
+    const payload = JSON.stringify({
+      sources: Array.from(this.sources.entries()),
+      _primaryKey: this._primaryKey,
+      _version: this._version,
+    });
     redis.set(REDIS_KEY, payload, 'EX', REDIS_TTL).catch(() => {});
   }
 
+  _isActive(entry) {
+    if (!entry) return false;
+    if (entry.status !== 'playing') return false;
+    const age = Date.now() - (entry.lastUpdate?.getTime?.() || 0);
+    return age <= STALE_MS;
+  }
+
+  _isFresh(entry) {
+    if (!entry) return false;
+    const age = Date.now() - (entry.lastUpdate?.getTime?.() || 0);
+    return age <= STALE_MS;
+  }
+
+  /**
+   * Pick the source surfaced to consumers. Sticky to the current primary
+   * while it's still actively playing — that's what prevents flicker when a
+   * second scrobbler concurrently sends a different track.
+   */
+  _recomputePrimary() {
+    const prev = this._primaryKey;
+
+    // Drop entries the consumer would never care about anymore.
+    this._cleanupStale();
+
+    // Stick to current primary if still actively playing.
+    if (prev && this._isActive(this.sources.get(prev))) {
+      return;
+    }
+
+    // Pick freshest playing source.
+    let bestKey = null;
+    let bestUpdate = -Infinity;
+    for (const [key, entry] of this.sources) {
+      if (!this._isActive(entry)) continue;
+      const t = entry.lastUpdate?.getTime?.() || 0;
+      if (t > bestUpdate) {
+        bestUpdate = t;
+        bestKey = key;
+      }
+    }
+
+    // Fallback: freshest paused/stopped (still within heartbeat window).
+    if (!bestKey) {
+      for (const [key, entry] of this.sources) {
+        if (!this._isFresh(entry)) continue;
+        const t = entry.lastUpdate?.getTime?.() || 0;
+        if (t > bestUpdate) {
+          bestUpdate = t;
+          bestKey = key;
+        }
+      }
+    }
+
+    // Final fallback: keep last known primary even if stale, so UI shows
+    // "what last played" instead of going blank between sessions.
+    if (!bestKey && prev && this.sources.has(prev)) {
+      bestKey = prev;
+    } else if (!bestKey) {
+      // Pick the freshest entry overall, regardless of staleness.
+      for (const [key, entry] of this.sources) {
+        const t = entry.lastUpdate?.getTime?.() || 0;
+        if (t > bestUpdate) {
+          bestUpdate = t;
+          bestKey = key;
+        }
+      }
+    }
+
+    if (bestKey !== prev) {
+      this._primaryKey = bestKey;
+    }
+  }
+
+  _cleanupStale() {
+    const now = Date.now();
+    for (const [key, entry] of this.sources) {
+      const age = now - (entry.lastUpdate?.getTime?.() || 0);
+      if (age > CLEANUP_MS) this.sources.delete(key);
+    }
+  }
+
   attachEnrichment({ animationUrl, appleMusicUrl }) {
-    if (!this.current?.track) return;
-    if (animationUrl) this.current.track.animationUrl = animationUrl;
-    if (appleMusicUrl) this.current.track.appleMusicUrl = appleMusicUrl;
+    const primary = this.current;
+    if (!primary?.track) return;
+    if (animationUrl) primary.track.animationUrl = animationUrl;
+    if (appleMusicUrl) primary.track.appleMusicUrl = appleMusicUrl;
     this._invalidateCache();
     this._persist();
   }
 
-  /** Return current version — used by enrichment callbacks to detect stale results */
   getVersion() {
     return this._version;
   }
 
-  /** Reset to idle — clears all in-memory state */
+  /** Reset every source to idle. */
   setIdle() {
-    this.current = null;
+    this.sources.clear();
+    this._primaryKey = null;
     this._version++;
     this._invalidateCache();
     this._persist();
   }
 
-  // Normalize minimal track info from webhook trackData
   buildTrackInfo(trackData) {
-    // Guard: if trackData is nullish, use empty object
     const d = trackData || {};
     return {
       title: d.title || d?.song?.processed?.track || d?.song?.parsed?.track || '',
@@ -80,12 +213,10 @@ class NowPlayingService {
       animationUrl: d.animationUrl || d?.song?.metadata?.animationUrl || null,
       masterTallUrl: d.masterTallUrl || d?.song?.metadata?.masterTallUrl || null,
       isLovedInService: d.isLovedInService || d?.song?.metadata?.userloved || false,
-      // pass through spotify summary if available on trackData
       spotify: d.spotify || null,
     };
   }
 
-  /** Invalidate the 1-second response cache whenever state changes */
   _invalidateCache() {
     this._cachedStatus = null;
     this._cachedAt = 0;
@@ -93,10 +224,9 @@ class NowPlayingService {
 
   setPlaying(trackData) {
     const now = new Date();
-    const prev = this.current;
+    const key = this._sourceKey(trackData);
+    const prev = this.sources.get(key);
 
-    // Compute progress — prefer explicit currentTime, else carry from paused,
-    // else derive from startedAt, else null
     let progress;
     if (typeof trackData.currentTime === 'number') {
       progress = trackData.currentTime;
@@ -117,101 +247,111 @@ class NowPlayingService {
           ? new Date(now.getTime() - progress * 1000)
           : now);
 
-    this.current = {
+    this.sources.set(key, {
       status: 'playing',
       track: this.buildTrackInfo(trackData),
       startedAt,
       lastUpdate: now,
       progressSeconds: progress,
-      source: trackData.source || 'web-scrobbler',
-    };
+      source: trackData.source || trackData.connector || key,
+    });
     this._version++;
+    this._recomputePrimary();
     this._invalidateCache();
     this._persist();
   }
 
+  /**
+   * Pause an active source. With no trackData (manual `/player/pause`), falls
+   * back to the current primary so single-source UX still works.
+   */
   setPaused(trackData) {
-    // Guard: allow calling without arguments (from playerController)
     const d = trackData || {};
     const now = new Date();
+    const explicitKey = d.source || d.connector ? this._sourceKey(d) : null;
+    const key = explicitKey || this._primaryKey;
+    if (!key) return; // nothing to pause
 
-    // Compute progress — prefer explicit currentTime, else derive from startedAt,
-    // else carry forward previous progressSeconds
+    const prev = this.sources.get(key);
+
     const explicitProgress = typeof d.currentTime === 'number' ? d.currentTime : null;
     const progress = explicitProgress ??
-      (this.current?.startedAt ? Math.floor((now - this.current.startedAt) / 1000) :
-       (this.current?.progressSeconds ?? null));
+      (prev?.startedAt ? Math.floor((now - prev.startedAt) / 1000) :
+       (prev?.progressSeconds ?? null));
 
     const hasTrackIdentity = !!(d.title && d.artist);
-    this.current = {
+    this.sources.set(key, {
       status: 'paused',
-      track: hasTrackIdentity ? this.buildTrackInfo(d) : (this.current?.track || this.buildTrackInfo({})),
-      startedAt: this.current?.startedAt || now,
+      track: hasTrackIdentity ? this.buildTrackInfo(d) : (prev?.track || this.buildTrackInfo({})),
+      startedAt: prev?.startedAt || now,
       lastUpdate: now,
       progressSeconds: progress,
-      source: d.source || this.current?.source || 'web-scrobbler',
-    };
+      source: d.source || d.connector || prev?.source || key,
+    });
     this._version++;
+    this._recomputePrimary();
     this._invalidateCache();
     this._persist();
   }
 
   setStopped(trackData) {
-    // Guard: allow calling without arguments (from playerController)
     const d = trackData || {};
     const now = new Date();
+    const explicitKey = d.source || d.connector ? this._sourceKey(d) : null;
+    const key = explicitKey || this._primaryKey;
+    if (!key) return;
 
-    // Compute progress from startedAt, else carry forward
-    const progress = this.current?.startedAt
-      ? Math.floor((now - this.current.startedAt) / 1000)
-      : (this.current?.progressSeconds ?? null);
+    const prev = this.sources.get(key);
+    const progress = prev?.startedAt
+      ? Math.floor((now - prev.startedAt) / 1000)
+      : (prev?.progressSeconds ?? null);
 
     const hasTrackIdentity = !!(d.title && d.artist);
-    const track = hasTrackIdentity ? this.buildTrackInfo(d) : (this.current?.track || this.buildTrackInfo({}));
-    this.current = {
+    const track = hasTrackIdentity ? this.buildTrackInfo(d) : (prev?.track || this.buildTrackInfo({}));
+    this.sources.set(key, {
       status: 'stopped',
       track,
-      startedAt: this.current?.startedAt || now,
+      startedAt: prev?.startedAt || now,
       lastUpdate: now,
       progressSeconds: progress,
-      source: d.source || this.current?.source || 'web-scrobbler',
-    };
+      source: d.source || d.connector || prev?.source || key,
+    });
     this._version++;
+    this._recomputePrimary();
     this._invalidateCache();
     this._persist();
   }
 
-  // Refresh current state as playing, optionally with new progress/duration
+  /** Refresh the primary source's progress without changing identity. */
   refreshPlaying({ currentTime = null, duration = null } = {}) {
     const now = new Date();
-    if (!this.current || !this.current.track) return;
+    const primary = this.current;
+    if (!primary || !primary.track) return;
 
-    this.current.status = 'playing';
-    this.current.lastUpdate = now;
+    primary.status = 'playing';
+    primary.lastUpdate = now;
 
     if (typeof duration === 'number' && duration > 0) {
-      this.current.track.duration = duration;
+      primary.track.duration = duration;
     }
 
     if (typeof currentTime === 'number' && currentTime >= 0) {
-      if (!this.current.startedAt) {
-        this.current.startedAt = new Date(now.getTime() - currentTime * 1000);
+      if (!primary.startedAt) {
+        primary.startedAt = new Date(now.getTime() - currentTime * 1000);
       }
-      this.current.progressSeconds = currentTime;
-    } else if (typeof this.current.progressSeconds === 'number') {
-      // Realign startedAt based on saved progress
-      this.current.startedAt = new Date(now.getTime() - this.current.progressSeconds * 1000);
-      // Recompute progress from startedAt
-      if (this.current.startedAt) {
-        this.current.progressSeconds = Math.floor((now - this.current.startedAt) / 1000);
+      primary.progressSeconds = currentTime;
+    } else if (typeof primary.progressSeconds === 'number') {
+      primary.startedAt = new Date(now.getTime() - primary.progressSeconds * 1000);
+      if (primary.startedAt) {
+        primary.progressSeconds = Math.floor((now - primary.startedAt) / 1000);
       }
     }
     this._version++;
+    this._recomputePrimary();
     this._invalidateCache();
     this._persist();
   }
 
-  // Force set playing with provided track data
   forcePlaying(trackData = {}) {
     this.setPlaying(trackData || {});
   }
@@ -219,16 +359,9 @@ class NowPlayingService {
   updateFromEvent(trackData) {
     const type = (trackData.eventType || '').toLowerCase();
 
-    if (type === 'paused') {
-      this.setPaused(trackData);
-      return;
-    }
-    if (type === 'stopped') {
-      this.setStopped(trackData);
-      return;
-    }
+    if (type === 'paused') { this.setPaused(trackData); return; }
+    if (type === 'stopped') { this.setStopped(trackData); return; }
 
-    // Playing-style events require track identity
     if (!trackData.title || !trackData.artist) return;
 
     if (type === 'nowplaying' || type === 'resumed' || type === 'resumedplaying' || type === 'scrobble') {
@@ -236,18 +369,17 @@ class NowPlayingService {
     }
   }
 
-  /**
-   * Compute live status with expiry heuristics.
-   * Uses a 1-second response cache to avoid recomputing on every poll.
-   */
   getStatus() {
-    // Return cached status if computed within the last second
     const nowMs = Date.now();
     if (this._cachedStatus && (nowMs - this._cachedAt) < 1000) {
       return this._cachedStatus;
     }
 
-    if (!this.current) {
+    // Re-evaluate primary in case stickiness expired since the last write.
+    this._recomputePrimary();
+
+    const primary = this.current;
+    if (!primary) {
       const result = { playing: false, status: 'unknown', updatedAt: null, track: null };
       this._cachedStatus = result;
       this._cachedAt = nowMs;
@@ -255,24 +387,19 @@ class NowPlayingService {
     }
 
     const now = new Date(nowMs);
-    const { status, track, startedAt, lastUpdate, progressSeconds } = this.current;
+    const { status, track, startedAt, lastUpdate, progressSeconds } = primary;
 
-    // Determine if stale
     let playing = status === 'playing';
     const elapsed = startedAt ? Math.floor((now - startedAt) / 1000) : null;
 
     if (playing) {
       if (track.duration && elapsed != null) {
-        if (elapsed > track.duration) {
-          playing = false;
-        }
+        if (elapsed > track.duration) playing = false;
       } else if (now - lastUpdate > 10 * 60 * 1000) {
-        // No duration; expire after 10 minutes since last update
         playing = false;
       }
     }
 
-    // Compute dynamic progress (simplified)
     let progress = null;
     if (playing) {
       if (typeof progressSeconds === 'number') {
@@ -286,7 +413,6 @@ class NowPlayingService {
     } else if (status === 'paused') {
       progress = typeof progressSeconds === 'number' ? progressSeconds : elapsed;
     } else {
-      // stopped or unknown — clamp to duration if available
       const base = typeof progressSeconds === 'number' ? progressSeconds : elapsed;
       progress = track.duration && base != null ? Math.min(base, track.duration) : base;
     }
@@ -299,7 +425,7 @@ class NowPlayingService {
       elapsed,
       progress,
       track,
-      source: this.current.source,
+      source: primary.source,
     };
 
     this._cachedStatus = result;
