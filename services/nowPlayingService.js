@@ -27,7 +27,9 @@ class NowPlayingService {
 
   _sourceKey(trackData) {
     const d = trackData || {};
-    return String(d.source || d.connector || 'unknown').toLowerCase();
+    const src = d.source || 'unknown';
+    const conn = d.connector || d?.song?.connector?.label || '';
+    return conn ? `${src}:${conn}`.toLowerCase() : src.toLowerCase();
   }
 
   async hydrate() {
