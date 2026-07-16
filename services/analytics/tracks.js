@@ -175,20 +175,20 @@ export const getTracksListing = async ({
 
   const tracks = await Scrobble.aggregate(pipeline);
 
-  // Calculate userPlayCount per track
-  const tracksWithPlayCount = await Promise.all(
-    tracks.map(async (scrobble) => {
-      const playCount = await Scrobble.countDocuments({
-        eventType: 'scrobble',
-        ...userScope(userId),
-        track: scrobble.track
-      });
-      return {
-        ...scrobble,
-        userPlayCount: playCount
-      };
-    })
-  );
+  // Calculate userPlayCount per track — one grouped count for the whole page
+  // instead of one countDocuments per row (was N+1, up to `limit` queries).
+  const pageTrackIds = tracks.map((s) => s.track).filter(Boolean);
+  const playCounts = pageTrackIds.length
+    ? await Scrobble.aggregate([
+        { $match: { eventType: 'scrobble', ...userScope(userId), track: { $in: pageTrackIds } } },
+        { $group: { _id: '$track', count: { $sum: 1 } } }
+      ])
+    : [];
+  const playCountByTrack = new Map(playCounts.map((c) => [String(c._id), c.count]));
+  const tracksWithPlayCount = tracks.map((scrobble) => ({
+    ...scrobble,
+    userPlayCount: playCountByTrack.get(String(scrobble.track)) || 0
+  }));
 
   const effectivePage = offset
     ? Math.floor(skip / sanitizedLimit) + 1
