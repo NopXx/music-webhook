@@ -456,7 +456,13 @@ class NowPlayingService {
 
   getStatus(userId) {
     const state = this._peek(userId);
-    return state ? state.getStatus() : { ...IDLE_STATUS };
+    if (!state) return { ...IDLE_STATUS };
+    const result = state.getStatus(); // triggers _cleanupStale on its sources
+    // Evict a fully-idle user so `users` doesn't grow one entry per user forever.
+    // ponytail: lazy-evict on read; a never-queried idle user lingers until
+    // restart. Add a periodic sweep only if the user count actually grows unbounded.
+    if (state.sources.size === 0) this.users.delete(this._key(userId));
+    return result;
   }
 
   /** Restore all users' state from Redis on boot. */

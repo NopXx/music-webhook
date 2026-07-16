@@ -375,23 +375,26 @@ class ScrobbleService {
       }
     } catch (error) {
       console.error(`❌ Error enriching TrackMeta ${trackMeta._id} with Spotify:`, error.message);
-      try {
-        await TrackMeta.findByIdAndUpdate(
-          trackMeta._id,
-          {
-            $set: {
-              spotify_search_attempted: true,
-              spotify_match_found: false,
-              spotify_enriched: false,
-            },
-          }
-        );
-      } catch (saveError) {
-        if (saveError.message?.includes('Cast to ObjectId failed')) {
-          console.log(`⚠️ TrackMeta ${trackMeta._id} no longer exists`);
-        } else {
-          console.error('❌ Error saving search attempt status:', saveError.message);
-        }
+      await this._markSearchAttempt(trackMeta._id, {
+        spotify_search_attempted: true,
+        spotify_match_found: false,
+        spotify_enriched: false,
+      }, 'search attempt');
+    }
+  }
+
+  /**
+   * Flag a search attempt on a TrackMeta, tolerating the doc having been
+   * deleted mid-enrichment (fire-and-forget enrichment races deletion).
+   */
+  async _markSearchAttempt(trackMetaId, fields, label) {
+    try {
+      await TrackMeta.findByIdAndUpdate(trackMetaId, { $set: fields });
+    } catch (saveError) {
+      if (saveError.message?.includes('Cast to ObjectId failed')) {
+        console.log(`⚠️ TrackMeta ${trackMetaId} no longer exists`);
+      } else {
+        console.error(`❌ Error saving ${label} status:`, saveError.message);
       }
     }
   }
@@ -449,23 +452,10 @@ class ScrobbleService {
       }
     } catch (error) {
       console.error(`❌ Error enriching TrackMeta ${trackMeta._id} with animation:`, error.message);
-      try {
-        await TrackMeta.findByIdAndUpdate(
-          trackMeta._id,
-          {
-            $set: {
-              animation_search_attempted: true,
-              animation_match_found: false,
-            },
-          }
-        );
-      } catch (saveError) {
-        if (saveError.message?.includes('Cast to ObjectId failed')) {
-          console.log(`⚠️ TrackMeta ${trackMeta._id} no longer exists`);
-        } else {
-          console.error('❌ Error saving animation search attempt status:', saveError.message);
-        }
-      }
+      await this._markSearchAttempt(trackMeta._id, {
+        animation_search_attempted: true,
+        animation_match_found: false,
+      }, 'animation search attempt');
     }
   }
 }
