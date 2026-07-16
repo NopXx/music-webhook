@@ -305,24 +305,6 @@ scrobbleSchema.statics.findOrCreateScrobble = async function (trackData) {
   return scrobble;
 };
 
-/**
- * Get recent scrobbles with populated track/artist/album data.
- */
-scrobbleSchema.statics.getRecentTracks = function (limit = 50, userId = null) {
-  const match = { eventType: 'scrobble' };
-  if (userId) match.user = userId;
-  return this.find(match)
-    .sort({ scrobbledAt: -1 })
-    .limit(limit)
-    .populate({
-      path: 'track',
-      populate: [
-        { path: 'artist', select: 'name imageUrl artistUrl' },
-        { path: 'album', select: 'name trackArtUrl albumUrl year' },
-      ],
-    });
-};
-
 const Scrobble = mongoose.model('Scrobble', scrobbleSchema);
 
 export default Scrobble;

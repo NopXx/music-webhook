@@ -41,7 +41,8 @@ mock.module("../services/scrobbleService.js", () => ({
   default: mockScrobbleService
 }));
 
-mock.module("../models/Track.js", () => ({
+// spotifyController reads/writes enrichment via TrackMeta (not the legacy Track).
+mock.module("../models/TrackMeta.js", () => ({
   default: mockTrack
 }));
 

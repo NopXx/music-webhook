@@ -3,12 +3,6 @@ import { describe, expect, test, mock } from "bun:test";
 import scrobbleService from "../services/scrobbleService.js";
 
 // Mock dependencies
-mock.module("../models/Track.js", () => ({
-  default: {
-    findByIdAndUpdate: async () => {},
-  },
-}));
-
 mock.module("../services/spotifyService.js", () => ({
   default: {
     isConfigured: () => false,
