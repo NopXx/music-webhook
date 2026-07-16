@@ -14,11 +14,14 @@ async function testRaceConditionFix() {
   console.log('=============================\n');
 
   // Test case: ส่งข้อมูลเดียวกันหลายครั้งในเวลาเดียวกัน
+  // `eventName` is what validation reads (body.eventName) — with `eventType`
+  // the payload fell through as a non-scrobble event and every request here
+  // was ignored, so this test silently exercised nothing.
   const testTrack = {
     title: "Test Race Condition Song",
     artist: "Test Artist",
     connector: "race-condition-test",
-    eventType: "scrobble"
+    eventName: "scrobble"
   };
 
   console.log('📤 Sending multiple requests simultaneously...');

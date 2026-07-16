@@ -19,6 +19,16 @@ Two distinct test styles — know which is which:
 - **`*.test.js`** (e.g. `cache.test.js`, `scrobbleService.test.js`) use the `bun:test` framework and connect to MongoDB directly. Run with `bun test test/cache.test.js`. They need a reachable `MONGODB_URI` (default falls back to `mongodb://localhost:27017/music-webhook-test`).
 - **`test-*.js` / `quick-test.js`** are integration scripts that HTTP-POST against a **running server** at `http://localhost:3000`. Start the server first, then run e.g. `bun run test:spotify`, `bun run quick-test`. The `bun run test:*` npm scripts map to these.
 
+These scripts write through the server, so **their data lands in whatever DB the server points at — including your real one**. Start it against a throwaway DB first, and make sure port 3000 is actually free (a stray older server keeps the port and silently serves the requests from the wrong DB):
+
+```bash
+lsof -ti:3000 | xargs kill                                   # no stray server
+DB_NAME=music-scrobbler-ittest PORT=3000 bun run index.js &   # throwaway DB
+bun test/test-race-condition.js                              # note: `bun <path>`, not `bun run <path>`
+```
+
+They authenticate via `test/_auth.js` (`apiKeyHeaders()` for `/webhook*`, `bearerHeaders()` for `/api/*`) using `API_KEY` / `ADMIN_EMAIL` / `ADMIN_PASSWORD`. They only log — **they do not assert and always exit 0**, so read the output rather than trusting the exit code. `test-duplicates.js` runs a real unattended DELETE.
+
 Run a single bun:test file: `bun test test/<name>.test.js`. There is no aggregate "run all" that covers both styles.
 
 ## Architecture
