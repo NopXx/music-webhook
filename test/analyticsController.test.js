@@ -31,7 +31,8 @@ const mockSpotifyService = {
 
 mock.module("../services/spotifyService.js", () => mockSpotifyService);
 
-mock.module("../models/Track.js", () => ({
+// getStats reads Spotify enrichment stats from TrackMeta (not the legacy Track).
+mock.module("../models/TrackMeta.js", () => ({
   default: {
     getSpotifyStats: mock(async () => ([{}]))
   }
@@ -41,7 +42,8 @@ describe("AnalyticsController", () => {
   let req, res;
 
   beforeEach(() => {
-    req = { query: {}, params: {} };
+    // Controllers require an authenticated user (per-user data isolation).
+    req = { query: {}, params: {}, user: { id: '000000000000000000000001' } };
     res = {
       status: mock(() => res),
       json: mock(() => res)

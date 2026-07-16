@@ -33,12 +33,13 @@ describe('userScope fail-closed shape', () => {
 describe('cross-tenant isolation (real query)', () => {
   beforeAll(async () => {
     await mongoose.connect(MONGODB_URI);
-    await Scrobble.findOrCreateScrobble({
-      eventType: 'scrobble',
-      artist: 'XT Isolation Artist',
-      title: 'XT Isolation Track',
-      album: 'XT Isolation Album',
+    // Insert directly (not findOrCreateScrobble) so this stays robust to a
+    // sibling test file's mock.module('TrackMeta') leaking across bun's shared
+    // registry — the isolation query counts by `user` and never joins TrackMeta.
+    await Scrobble.create({
       user: userA,
+      track: new mongoose.Types.ObjectId(),
+      eventType: 'scrobble',
     });
   });
 
