@@ -70,17 +70,34 @@ export const requireRole = (...roles) => (req, res, next) => {
   next();
 };
 
-// Memoized legacy-key admin. The seeded admin is stable, so the oldest-admin
-// lookup that maps a legacy global API_KEY to a user runs once per process
-// instead of once per webhook request. Safe across warm serverless invocations.
-let legacyAdminCache = null;
-const resolveLegacyAdmin = async () => {
-  if (legacyAdminCache) return legacyAdminCache;
-  const admin = await User.findOne({ role: 'admin' }).sort({ createdAt: 1 });
-  if (admin) {
-    legacyAdminCache = { id: String(admin._id), email: admin.email, role: admin.role };
+// Resolve which user the legacy global API_KEY scrobbles as.
+//
+// Set API_KEY_OWNER_EMAIL to name that account explicitly. Without it we fall
+// back to the oldest admin, which is a guess: if a newer account holds the real
+// listening history, scrobbles silently land on the wrong user and the history
+// splits in two. If the configured email doesn't exist we fail closed (401)
+// rather than quietly picking someone else.
+//
+// Memoized — the mapping is stable, so this runs once per process instead of
+// once per webhook request. Safe across warm serverless invocations.
+let legacyOwnerCache = null;
+const resolveLegacyOwner = async () => {
+  if (legacyOwnerCache) return legacyOwnerCache;
+
+  const configuredEmail = process.env.API_KEY_OWNER_EMAIL?.trim().toLowerCase();
+  const owner = configuredEmail
+    ? await User.findOne({ email: configuredEmail })
+    : await User.findOne({ role: 'admin' }).sort({ createdAt: 1 });
+
+  if (!owner) {
+    if (configuredEmail) {
+      console.error(`❌ API_KEY_OWNER_EMAIL="${configuredEmail}" matches no user — legacy API key rejected`);
+    }
+    return null;
   }
-  return legacyAdminCache;
+
+  legacyOwnerCache = { id: String(owner._id), email: owner.email, role: owner.role };
+  return legacyOwnerCache;
 };
 
 /**
@@ -88,7 +105,7 @@ const resolveLegacyAdmin = async () => {
  * Sets req.user to the key owner / token user. Used for webhook + now-playing intake.
  *
  * API key resolution order:
- *   1. Legacy global API_KEY env → maps to the seeded admin user
+ *   1. Legacy global API_KEY env → maps to API_KEY_OWNER_EMAIL (or oldest admin)
  *   2. Per-user ApiKey lookup (ApiKey.verifyKey)
  *   3. JWT fallback (Bearer / cookie)
  */
@@ -99,11 +116,11 @@ export const authenticateClient = async (req, res, next) => {
   const rawKey = req.headers['x-api-key'] || (typeof queryKey === 'string' ? queryKey : undefined);
 
   if (rawKey) {
-    // 1. Legacy global key → admin (memoized, see resolveLegacyAdmin)
+    // 1. Legacy global key → its configured owner (memoized, see resolveLegacyOwner)
     if (process.env.API_KEY && rawKey === process.env.API_KEY) {
-      const admin = await resolveLegacyAdmin();
-      if (admin) {
-        req.user = { ...admin };
+      const owner = await resolveLegacyOwner();
+      if (owner) {
+        req.user = { ...owner };
         return next();
       }
     }
