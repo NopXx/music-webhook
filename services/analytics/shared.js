@@ -166,7 +166,11 @@ export const normalizeConnectorDocs = (docs = []) => {
 // Common $lookup stages to hydrate Scrobble docs
 // ──────────────────────────────────────────────
 
-export const HYDRATE_PIPELINE = [
+// Just the TrackMeta join — the part of HYDRATE_PIPELINE that decides which
+// scrobbles survive (the $unwind drops any whose TrackMeta is gone). Callers
+// that only need that filter (e.g. counting) can use this instead of paying for
+// the artist/album joins. HYDRATE_PIPELINE builds on it so the two can't drift.
+export const TRACKMETA_JOIN = [
   {
     $lookup: {
       from: 'trackmetas',
@@ -175,7 +179,14 @@ export const HYDRATE_PIPELINE = [
       as: 'trackInfo'
     }
   },
-  { $unwind: '$trackInfo' },
+  { $unwind: '$trackInfo' }
+];
+
+// The rest of the hydration: resolve artist/album names off an already-joined
+// trackInfo and flatten everything. Expensive per row, and only needed when the
+// output actually shows those names — so stages that just count or group can
+// run TRACKMETA_JOIN alone and apply this to the handful of rows they keep.
+export const ARTIST_ALBUM_JOIN = [
   {
     $lookup: {
       from: 'artists',
@@ -213,6 +224,8 @@ export const HYDRATE_PIPELINE = [
     }
   }
 ];
+
+export const HYDRATE_PIPELINE = [...TRACKMETA_JOIN, ...ARTIST_ALBUM_JOIN];
 
 export const buildRecentProjection = () => ({
   title: 1,

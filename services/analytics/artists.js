@@ -35,30 +35,67 @@ const computeTopArtistsLeaderboard = async ({
     ...(rangeMatch || {})
   };
 
+  // Roll up per track first (track is on the scrobble, so this needs no join),
+  // then join trackmetas once per distinct track rather than once per scrobble,
+  // and resolve artist/album names only for the top-N rows.
   const pipeline = [
     { $match: baseMatch },
-    ...HYDRATE_PIPELINE,
     { $sort: { scrobbledAt: -1 } },
     {
       $group: {
-        _id: '$trackInfo.artist',
-        artist: { $first: '$artist' },
+        _id: '$track',
         plays: { $sum: 1 },
+        lastScrobbledAt: { $first: '$scrobbledAt' },
+        lastConnector: { $first: '$connector' }
+      }
+    },
+    {
+      $lookup: {
+        from: 'trackmetas',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'trackInfo'
+      }
+    },
+    { $unwind: '$trackInfo' },
+    // Ordered so the $first below is each artist's most recently played track.
+    { $sort: { lastScrobbledAt: -1 } },
+    {
+      $group: {
+        _id: '$trackInfo.artist',
+        plays: { $sum: '$plays' },
         lastTrack: {
           $first: {
-            title: '$title',
-            album: '$album',
-            scrobbledAt: '$scrobbledAt',
-            connector: '$connector',
-            trackArtUrl: '$trackArtUrl',
-            animationUrl: '$animationUrl',
-            albumUrl: '$albumUrl'
+            title: '$trackInfo.title',
+            albumId: '$trackInfo.album',
+            scrobbledAt: '$lastScrobbledAt',
+            connector: '$lastConnector',
+            trackArtUrl: '$trackInfo.trackArtUrl',
+            animationUrl: '$trackInfo.animationUrl'
           }
         }
       }
     },
     { $sort: { plays: -1 } },
-    { $limit: sanitizedLimit }
+    { $limit: sanitizedLimit },
+    {
+      $lookup: {
+        from: 'artists',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'artistInfo'
+      }
+    },
+    { $unwind: '$artistInfo' },
+    {
+      $lookup: {
+        from: 'albums',
+        localField: 'lastTrack.albumId',
+        foreignField: '_id',
+        as: 'albumInfo'
+      }
+    },
+    { $unwind: { path: '$albumInfo', preserveNullAndEmptyArrays: true } }
   ];
 
   const results = await Scrobble.aggregate(pipeline);
@@ -69,12 +106,25 @@ const computeTopArtistsLeaderboard = async ({
       start: toIsoString(window.start),
       end: toIsoString(window.end)
     },
-    items: results.map((doc) => ({
-      artist: doc.artist,
-      plays: doc.plays,
-      latestTrack: doc.lastTrack,
-      artistImage: doc.lastTrack?.trackArtUrl || doc.lastTrack?.animationUrl || null
-    }))
+    // Rebuilt in JS to keep the original latestTrack field order and the
+    // HYDRATE_PIPELINE's `$ifNull(..., '')` semantics for album fields.
+    items: results.map((doc) => {
+      const latestTrack = {
+        title: doc.lastTrack.title,
+        album: doc.albumInfo?.name ?? '',
+        scrobbledAt: doc.lastTrack.scrobbledAt,
+        connector: doc.lastTrack.connector,
+        trackArtUrl: doc.lastTrack.trackArtUrl,
+        animationUrl: doc.lastTrack.animationUrl,
+        albumUrl: doc.albumInfo?.albumUrl ?? ''
+      };
+      return {
+        artist: doc.artistInfo.name,
+        plays: doc.plays,
+        latestTrack,
+        artistImage: latestTrack.trackArtUrl || latestTrack.animationUrl || null
+      };
+    })
   };
 };
 

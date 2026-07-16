@@ -1,6 +1,7 @@
 import Scrobble from '../../models/Scrobble.js';
 import {
-  HYDRATE_PIPELINE,
+  TRACKMETA_JOIN,
+  ARTIST_ALBUM_JOIN,
   buildRangeMatch,
   userScope,
   toIsoString,
@@ -29,9 +30,13 @@ const computeStatsOverview = async ({
     ...(rangeMatch || {})
   };
 
+  // Hydrate only as far as every branch needs (TrackMeta — it supplies duration
+  // and artist ids, and its $unwind decides which scrobbles count at all). The
+  // artist/album name joins are pushed into just the two branches that show
+  // names, where they run on a handful of rows instead of every scrobble.
   const pipeline = [
     { $match: baseMatch },
-    ...HYDRATE_PIPELINE,
+    ...TRACKMETA_JOIN,
     {
       $facet: {
         plays: [
@@ -42,8 +47,8 @@ const computeStatsOverview = async ({
               totalDuration: {
                 $sum: {
                   $cond: [
-                    { $and: [{ $ifNull: ['$duration', false] }, { $gt: ['$duration', 0] }] },
-                    '$duration',
+                    { $and: [{ $ifNull: ['$trackInfo.duration', false] }, { $gt: ['$trackInfo.duration', 0] }] },
+                    '$trackInfo.duration',
                     0
                   ]
                 }
@@ -51,8 +56,8 @@ const computeStatsOverview = async ({
               avgDuration: {
                 $avg: {
                   $cond: [
-                    { $and: [{ $ifNull: ['$duration', false] }, { $gt: ['$duration', 0] }] },
-                    '$duration',
+                    { $and: [{ $ifNull: ['$trackInfo.duration', false] }, { $gt: ['$trackInfo.duration', 0] }] },
+                    '$trackInfo.duration',
                     null
                   ]
                 }
@@ -94,6 +99,7 @@ const computeStatsOverview = async ({
         recent: [
           { $sort: { scrobbledAt: -1 } },
           { $limit: Math.max(1, recentLimit) },
+          ...ARTIST_ALBUM_JOIN,   // only the rows we return
           { $project: buildRecentProjection() }
         ],
         topArtists: [
@@ -101,13 +107,23 @@ const computeStatsOverview = async ({
           {
             $group: {
               _id: '$trackInfo.artist',
-              artist: { $first: '$artist' },
               plays: { $sum: 1 },
               lastScrobble: { $first: '$scrobbledAt' }
             }
           },
           { $sort: { plays: -1 } },
-          { $limit: Math.max(1, topArtistLimit) }
+          { $limit: Math.max(1, topArtistLimit) },
+          // Resolve names for the top N only.
+          {
+            $lookup: {
+              from: 'artists',
+              localField: '_id',
+              foreignField: '_id',
+              as: 'artistInfo'
+            }
+          },
+          { $unwind: '$artistInfo' },
+          { $addFields: { artist: '$artistInfo.name' } }
         ]
       }
     }

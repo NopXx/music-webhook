@@ -3,6 +3,7 @@ import TrackMeta from '../../models/TrackMeta.js';
 import Artist from '../../models/Artist.js';
 import {
   HYDRATE_PIPELINE,
+  TRACKMETA_JOIN,
   buildRangeMatch,
   userScope,
   toObjectId,
@@ -30,6 +31,11 @@ const SORTABLE_TRACK_FIELDS = new Set([
   'connector',
   'source'
 ]);
+
+// The subset of SORTABLE_TRACK_FIELDS that only exists after HYDRATE_PIPELINE
+// joins TrackMeta/Artist/Album. Sorting on these forces hydration up-front;
+// the rest live on the scrobble itself and can be sorted before joining.
+const HYDRATE_SORT_FIELDS = new Set(['artist', 'title', 'album', 'duration']);
 
 const safePage = (page) => {
   const value = Number(page);
@@ -125,19 +131,16 @@ const computeTracksListing = async ({
   if (connector) scrobbleMatch.connector = connector;
   if (source) scrobbleMatch.source = source;
 
-  // Build aggregation pipeline
-  const pipeline = [
-    { $match: scrobbleMatch },
-    ...HYDRATE_PIPELINE,
-  ];
+  // Search filters run on hydrated fields (artist/title/album names), so they
+  // are collected separately from the scrobble-level match.
+  const searchStages = [];
 
-  // If there is a search query, filter after hydration
-  // If there is a global search query
+  // Global search query
   if (search && typeof search === 'string') {
     const keywords = search.trim();
     if (keywords.length > 0) {
       const regex = new RegExp(keywords.replace(/\s+/g, '.*'), 'i');
-      pipeline.push({
+      searchStages.push({
         $match: {
           $or: [
             { title: regex },
@@ -162,20 +165,34 @@ const computeTracksListing = async ({
   }
 
   if (Object.keys(fieldMatches).length > 0) {
-    pipeline.push({ $match: fieldMatches });
+    searchStages.push({ $match: fieldMatches });
   }
 
-  // Count total after filtering
-  const countPipeline = [...pipeline, { $count: 'total' }];
+  // Hydration is only required up-front when something downstream reads a joined
+  // field: a search filter, or a sort on artist/title/album/duration. Otherwise
+  // we sort+paginate on the raw scrobbles and join only the page's rows.
+  const needsHydrateForFilter = searchStages.length > 0;
+  const needsHydrateForSort = HYDRATE_SORT_FIELDS.has(sanitizedSortField);
+  const hydrateFirst = needsHydrateForFilter || needsHydrateForSort;
+
+  // Count total after filtering. Without a search filter, the only thing
+  // HYDRATE_PIPELINE changes about the count is dropping scrobbles whose
+  // TrackMeta is gone — so the TrackMeta join alone gives the same number
+  // without paying for the artist/album joins.
+  const countPipeline = needsHydrateForFilter
+    ? [{ $match: scrobbleMatch }, ...HYDRATE_PIPELINE, ...searchStages, { $count: 'total' }]
+    : [{ $match: scrobbleMatch }, ...TRACKMETA_JOIN, { $count: 'total' }];
   const [countResult] = await Scrobble.aggregate(countPipeline);
   const total = countResult?.total || 0;
 
-  // Retrieve page
-  pipeline.push(
+  const pageStages = [
     { $sort: { [sanitizedSortField]: sanitizedOrder } },
     { $skip: skip },
     { $limit: sanitizedLimit }
-  );
+  ];
+  const pipeline = hydrateFirst
+    ? [{ $match: scrobbleMatch }, ...HYDRATE_PIPELINE, ...searchStages, ...pageStages]
+    : [{ $match: scrobbleMatch }, ...pageStages, ...HYDRATE_PIPELINE];
 
   const tracks = await Scrobble.aggregate(pipeline);
 
