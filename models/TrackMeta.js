@@ -158,6 +158,11 @@ const trackMetaSchema = new mongoose.Schema({
 
 // Compound unique index: one track per artist (case-insensitive)
 trackMetaSchema.index({ titleLower: 1, artist: 1 }, { unique: true });
+// Analytics filters TrackMeta by artist/album alone (getArtistProfile,
+// getAlbumInsights). The compound unique index above can't serve {artist} or
+// {album} queries (artist is not a prefix), so these avoid a collection scan.
+trackMetaSchema.index({ artist: 1 });
+trackMetaSchema.index({ album: 1 });
 trackMetaSchema.index({ spotify_enriched: 1 });
 trackMetaSchema.index({ spotify_search_attempted: 1 });
 trackMetaSchema.index({ 'spotify.id': 1 });
