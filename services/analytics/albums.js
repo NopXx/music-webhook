@@ -9,14 +9,17 @@ import {
   ensureTimezone,
   normalizeConnectorDocs,
   buildRecentProjection,
-  DEFAULT_TIMEZONE
+  DEFAULT_TIMEZONE,
+  withAnalyticsCache,
+  analyticsCacheKey,
+  CACHE_TTL
 } from './shared.js';
 
 // ──────────────────────────────────────────────
 // Album Insights
 // ──────────────────────────────────────────────
 
-export const getAlbumInsights = async ({
+const computeAlbumInsights = async ({
   artist,
   album,
   recentLimit = 12,
@@ -159,3 +162,12 @@ export const getAlbumInsights = async ({
       null
   };
 };
+
+export const getAlbumInsights = (args = {}) =>
+  withAnalyticsCache(
+    analyticsCacheKey('album', args.userId, [
+      args.artist, args.album, args.recentLimit, args.timezone
+    ]),
+    CACHE_TTL.insights,
+    () => computeAlbumInsights(args)
+  );

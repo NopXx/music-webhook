@@ -11,14 +11,17 @@ import {
   toIsoString,
   normalizeConnectorDocs,
   buildRecentProjection,
-  DEFAULT_TIMEZONE
+  DEFAULT_TIMEZONE,
+  withAnalyticsCache,
+  analyticsCacheKey,
+  CACHE_TTL
 } from './shared.js';
 
 // ──────────────────────────────────────────────
 // Top Artists Leaderboard
 // ──────────────────────────────────────────────
 
-export const getTopArtistsLeaderboard = async ({
+const computeTopArtistsLeaderboard = async ({
   range = 'all-time',
   offset = 0,
   limit = 10,
@@ -79,7 +82,7 @@ export const getTopArtistsLeaderboard = async ({
 // Artist Profile
 // ──────────────────────────────────────────────
 
-export const getArtistProfileData = async ({
+const computeArtistProfileData = async ({
   name,
   tz = DEFAULT_TIMEZONE,
   topLimit = 10,
@@ -240,3 +243,21 @@ export const getArtistProfileData = async ({
     artistImage
   };
 };
+
+export const getTopArtistsLeaderboard = (args = {}) =>
+  withAnalyticsCache(
+    analyticsCacheKey('top-artists', args.userId, [
+      args.range, args.offset, args.limit
+    ]),
+    CACHE_TTL.leaderboard,
+    () => computeTopArtistsLeaderboard(args)
+  );
+
+export const getArtistProfileData = (args = {}) =>
+  withAnalyticsCache(
+    analyticsCacheKey('artist', args.userId, [
+      args.name, args.tz, args.topLimit, args.recentLimit
+    ]),
+    CACHE_TTL.insights,
+    () => computeArtistProfileData(args)
+  );

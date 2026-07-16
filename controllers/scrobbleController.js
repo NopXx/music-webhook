@@ -5,7 +5,7 @@ import nowPlayingService from '../services/nowPlayingService.js';
 import spotifyService from '../services/spotifyService.js';
 import appleMusicService from '../services/appleMusicService.js';
 import { normalizeListenBrainzEntry } from '../middleware/validation.js';
-import { updateLovedTrackStatus } from '../services/analyticsService.js';
+import { updateLovedTrackStatus, invalidateUserAnalytics } from '../services/analyticsService.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -94,6 +94,10 @@ class ScrobbleController {
 
       const trackMeta = result._trackMeta;
       console.log(`📝 Scrobble ${action}: ${trackData.artist} - ${trackData.title} [${trackData.connector || ''}]`);
+
+      // New scrobble landed → this user's cached analytics are now stale.
+      // Fire-and-forget so the intake hot path isn't blocked on cache eviction.
+      invalidateUserAnalytics(trackData.user).catch(() => {});
 
       // Trigger background enrichment on TrackMeta (fire and forget)
       
@@ -331,6 +335,11 @@ class ScrobbleController {
         summary.updated.length +
         summary.skipped.length +
         summary.ignored.length;
+
+      // Batch may have added scrobbles → drop this user's cached analytics once.
+      if (summary.created.length || summary.updated.length) {
+        invalidateUserAnalytics(req.user?.id).catch(() => {});
+      }
 
       const success = summary.errors.length === 0;
       const message = success

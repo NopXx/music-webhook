@@ -5,14 +5,17 @@ import {
   userScope,
   toIsoString,
   normalizeConnectorDocs,
-  buildRecentProjection
+  buildRecentProjection,
+  withAnalyticsCache,
+  analyticsCacheKey,
+  CACHE_TTL
 } from './shared.js';
 
 // ──────────────────────────────────────────────
 // Stats Overview
 // ──────────────────────────────────────────────
 
-export const getStatsOverview = async ({
+const computeStatsOverview = async ({
   range = 'all-time',
   offset = 0,
   recentLimit = 10,
@@ -136,3 +139,12 @@ export const getStatsOverview = async ({
     }
   };
 };
+
+export const getStatsOverview = (args = {}) =>
+  withAnalyticsCache(
+    analyticsCacheKey('stats', args.userId, [
+      args.range, args.offset, args.recentLimit, args.topArtistLimit
+    ]),
+    CACHE_TTL.stats,
+    () => computeStatsOverview(args)
+  );

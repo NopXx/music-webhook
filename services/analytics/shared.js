@@ -1,6 +1,37 @@
 import { toObjectId, userScope } from '../../utils/objectId.js';
+import cacheRepo from '../cacheRepo.js';
 
 export { toObjectId, userScope };
+
+// ── Analytics result cache ─────────────────────
+// Read endpoints run heavy aggregations; results tolerate brief staleness.
+// Keys are scoped by userId FIRST so invalidation (`analytics:<uid>:*`) can
+// never touch another user's entries, and a scrobble/loved-flag write for a
+// user drops exactly that user's cached analytics.
+export const CACHE_TTL = {
+  stats: 90_000,
+  tracks: 90_000,
+  leaderboard: 90_000,
+  insights: 300_000,
+};
+
+export const analyticsCacheKey = (name, userId, parts = []) =>
+  `analytics:${toObjectId(userId) || 'anon'}:${name}:${JSON.stringify(parts)}`;
+
+export const withAnalyticsCache = async (key, ttlMs, producer) => {
+  const hit = await cacheRepo.get(key); // undefined = miss; null = cached null
+  if (hit !== undefined) return hit;
+  const val = await producer();
+  await cacheRepo.set(key, val, ttlMs);
+  return val;
+};
+
+// Drop every cached analytics entry for one user (called after a write).
+export const invalidateUserAnalytics = (userId) => {
+  const uid = toObjectId(userId);
+  if (!uid) return Promise.resolve();
+  return cacheRepo.del(`analytics:${uid}:*`);
+};
 
 export const RANGE_CONFIG = {
   week: { ms: 7 * 24 * 60 * 60 * 1000 },

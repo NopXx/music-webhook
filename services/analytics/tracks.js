@@ -11,7 +11,11 @@ import {
   toIsoString,
   normalizeConnectorDocs,
   DEFAULT_TIMEZONE,
-  WEEKDAY_LABELS
+  WEEKDAY_LABELS,
+  withAnalyticsCache,
+  analyticsCacheKey,
+  CACHE_TTL,
+  invalidateUserAnalytics
 } from './shared.js';
 
 const SORTABLE_TRACK_FIELDS = new Set([
@@ -87,7 +91,7 @@ const normalizeSourceDocs = (docs = []) => {
 // Tracks Listing (paginated)
 // ──────────────────────────────────────────────
 
-export const getTracksListing = async ({
+const computeTracksListing = async ({
   page,
   limit,
   offset,
@@ -250,6 +254,9 @@ export const updateLovedTrackStatus = async ({ id, isLoved, userId = null }) => 
     throw new Error('Track not found');
   }
 
+  // Loved flag changed → drop this user's cached analytics.
+  await invalidateUserAnalytics(userId);
+
   return scrobble;
 };
 
@@ -257,7 +264,7 @@ export const updateLovedTrackStatus = async ({ id, isLoved, userId = null }) => 
 // Top Tracks Leaderboard
 // ──────────────────────────────────────────────
 
-export const getTopTracksLeaderboard = async ({
+const computeTopTracksLeaderboard = async ({
   range = 'all-time',
   offset = 0,
   limit = 15,
@@ -324,7 +331,7 @@ export const getTopTracksLeaderboard = async ({
 // Track Insights (single track detailed analytics)
 // ──────────────────────────────────────────────
 
-export const getTrackInsights = async ({
+const computeTrackInsights = async ({
   artist,
   title,
   timezone = DEFAULT_TIMEZONE,
@@ -569,3 +576,32 @@ export const getTrackInsights = async ({
       : null
   };
 };
+
+export const getTracksListing = (args = {}) =>
+  withAnalyticsCache(
+    analyticsCacheKey('tracks', args.userId, [
+      args.page, args.limit, args.offset, args.sortBy, args.order,
+      args.search, args.searchTitle, args.searchArtist, args.searchAlbum,
+      args.connector, args.source, args.range, args.rangeOffset
+    ]),
+    CACHE_TTL.tracks,
+    () => computeTracksListing(args)
+  );
+
+export const getTopTracksLeaderboard = (args = {}) =>
+  withAnalyticsCache(
+    analyticsCacheKey('top-tracks', args.userId, [
+      args.range, args.offset, args.limit
+    ]),
+    CACHE_TTL.leaderboard,
+    () => computeTopTracksLeaderboard(args)
+  );
+
+export const getTrackInsights = (args = {}) =>
+  withAnalyticsCache(
+    analyticsCacheKey('track', args.userId, [
+      args.artist, args.title, args.timezone, args.recentLimit
+    ]),
+    CACHE_TTL.insights,
+    () => computeTrackInsights(args)
+  );

@@ -1,4 +1,4 @@
-export { resolveRangeWindow } from './analytics/shared.js';
+export { resolveRangeWindow, invalidateUserAnalytics } from './analytics/shared.js';
 export { getStatsOverview } from './analytics/stats.js';
 export {
   getTracksListing,
