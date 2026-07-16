@@ -2,6 +2,7 @@
 
 // Test script for Spotify integration
 import { config } from 'dotenv';
+import { bearerHeaders } from './_auth.js';
 
 // Load environment variables
 config();
@@ -33,7 +34,9 @@ class SpotifyIntegrationTester {
     console.log('📋 Testing Spotify Status...');
     
     try {
-      const response = await fetch(`${BASE_URL}/api/spotify/status`);
+      const response = await fetch(`${BASE_URL}/api/spotify/status`, {
+        headers: await bearerHeaders()
+      });
       const data = await response.json();
       
       if (response.ok) {
@@ -58,7 +61,9 @@ class SpotifyIntegrationTester {
     console.log('📊 Testing Spotify Statistics...');
     
     try {
-      const response = await fetch(`${BASE_URL}/api/spotify/stats`);
+      const response = await fetch(`${BASE_URL}/api/spotify/stats`, {
+        headers: await bearerHeaders()
+      });
       const data = await response.json();
       
       if (response.ok) {
@@ -87,7 +92,8 @@ class SpotifyIntegrationTester {
     try {
       // Test with limit parameter
       const response = await fetch(`${BASE_URL}/api/spotify/enrich?limit=5&dryRun=true`, {
-        method: 'POST'
+        method: 'POST',
+        headers: await bearerHeaders()
       });
       const data = await response.json();
       
@@ -118,7 +124,8 @@ class SpotifyIntegrationTester {
     
     try {
       const response = await fetch(`${BASE_URL}/api/spotify/cache`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: await bearerHeaders()
       });
       const data = await response.json();
       
@@ -199,7 +206,9 @@ async function testBasicAPI() {
     }
     
     // Test stats endpoint
-    const statsResponse = await fetch(`${BASE_URL}/api/stats`);
+    const statsResponse = await fetch(`${BASE_URL}/api/stats`, {
+      headers: await bearerHeaders()
+    });
     if (statsResponse.ok) {
       const stats = await statsResponse.json();
       console.log('✅ Stats endpoint working');

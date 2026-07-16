@@ -5,6 +5,7 @@
  */
 
 import axios from 'axios';
+import { bearerHeaders } from './_auth.js';
 
 const BASE_URL = process.env.WEBHOOK_URL || 'http://localhost:3000';
 
@@ -42,7 +43,9 @@ async function testEndpoint(config) {
   
   try {
     const startTime = Date.now();
-    const response = await axios.post(config.url);
+    // Body is {} rather than null: the helper sets Content-Type: application/json,
+    // and an empty body under that content type fails express.json() parsing.
+    const response = await axios.post(config.url, {}, { headers: await bearerHeaders() });
     const endTime = Date.now();
     
     console.log('✅ Success!');
@@ -73,7 +76,9 @@ async function checkServerStatus() {
     console.log('✅ Server is healthy');
     
     // Check Spotify status
-    const spotifyResponse = await axios.get(`${BASE_URL}/api/spotify/status`);
+    const spotifyResponse = await axios.get(`${BASE_URL}/api/spotify/status`, {
+      headers: await bearerHeaders()
+    });
     if (spotifyResponse.data.configured) {
       console.log('✅ Spotify is configured');
     } else {

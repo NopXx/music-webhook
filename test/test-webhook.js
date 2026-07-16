@@ -1,8 +1,21 @@
 // Test script สำหรับทดสอบ Express.js webhook endpoints
 // วิธีใช้: bun run test
 
+import { apiKeyHeaders, bearerHeaders } from './_auth.js';
+
 const BASE_URL = 'http://localhost:3000';
-const API_KEY = 'your-api-key-here'; // ถ้ามี
+const API_KEY = process.env.API_KEY; // legacy global key → seeded admin
+
+// /webhook* + now-playing intake accept the API key; other /api/* need a JWT.
+async function headersFor(endpoint) {
+  if (endpoint.startsWith('/webhook') || endpoint.startsWith('/api/nowplaying/playing')) {
+    return apiKeyHeaders();
+  }
+  if (endpoint.startsWith('/api/')) {
+    return bearerHeaders();
+  }
+  return { 'Content-Type': 'application/json' };
+}
 
 console.log('🧪 Testing Music Webhook Server (Express.js)...\n');
 
@@ -61,7 +74,7 @@ async function testEndpoint(method, endpoint, data = null, headers = {}) {
     const options = {
       method,
       headers: {
-        'Content-Type': 'application/json',
+        ...(await headersFor(endpoint)),
         ...headers
       }
     };

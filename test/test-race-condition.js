@@ -2,6 +2,7 @@
 
 // Test script สำหรับทดสอบการแก้ไข race condition
 import { config } from 'dotenv';
+import { apiKeyHeaders, bearerHeaders } from './_auth.js';
 
 // Load environment variables
 config();
@@ -29,9 +30,7 @@ async function testRaceConditionFix() {
       promises.push(
         fetch(`${BASE_URL}/webhook/scrobble`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: apiKeyHeaders(),
           body: JSON.stringify({
             ...testTrack,
             title: `${testTrack.title} ${i + 1}`
@@ -88,9 +87,7 @@ async function testSpotifyEnrichmentRobustness() {
     try {
       const response = await fetch(`${BASE_URL}/webhook/scrobble`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: apiKeyHeaders(),
         body: JSON.stringify({
           title: track.title,
           artist: track.artist,
@@ -128,7 +125,9 @@ async function checkEnrichmentStatus() {
 
   try {
     // ดูสถิติ Spotify
-    const response = await fetch(`${BASE_URL}/api/spotify/stats`);
+    const response = await fetch(`${BASE_URL}/api/spotify/stats`, {
+      headers: await bearerHeaders()
+    });
     if (response.ok) {
       const stats = await response.json();
       console.log('📈 Current Spotify Statistics:');
@@ -158,7 +157,8 @@ async function testManualEnrichment() {
     console.log('🚀 Triggering manual enrichment for pending tracks...');
     
     const response = await fetch(`${BASE_URL}/api/spotify/enrich?limit=5`, {
-      method: 'POST'
+      method: 'POST',
+      headers: await bearerHeaders()
     });
 
     if (response.ok) {

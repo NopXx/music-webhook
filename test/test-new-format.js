@@ -1,6 +1,8 @@
 // Test script สำหรับทดสอบ Web-scrobbler format ใหม่
 // วิธีใช้: bun run test-new-format.js
 
+import { apiKeyHeaders, bearerHeaders } from './_auth.js';
+
 const BASE_URL = 'http://localhost:3000';
 
 console.log('🧪 Testing Web-scrobbler New Format...\n');
@@ -87,9 +89,7 @@ async function testWebhook(testName, data) {
     
     const response = await fetch(`${BASE_URL}/webhook/scrobble`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: apiKeyHeaders(),
       body: JSON.stringify(data)
     });
 
@@ -155,7 +155,9 @@ async function main() {
   // Get recent tracks to verify data was saved
   console.log('\n📋 Checking saved tracks...');
   try {
-    const tracksResponse = await fetch(`${BASE_URL}/api/tracks?limit=3`);
+    const tracksResponse = await fetch(`${BASE_URL}/api/tracks?limit=3`, {
+      headers: await bearerHeaders()
+    });
     const tracksData = await tracksResponse.json();
     
     if (tracksData.tracks && tracksData.tracks.length > 0) {

@@ -1,6 +1,8 @@
 // Test script สำหรับทดสอบการบันทึก metadata
 // วิธีใช้: bun run test-metadata.js
 
+import { apiKeyHeaders, bearerHeaders } from './_auth.js';
+
 const BASE_URL = 'http://localhost:3000';
 
 console.log('🧪 Testing Metadata Storage...\n');
@@ -57,9 +59,7 @@ async function testMetadataStorage() {
     
     const response = await fetch(`${BASE_URL}/webhook/scrobble`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: apiKeyHeaders(),
       body: JSON.stringify(webScrobblerWithMetadata)
     });
 
@@ -89,7 +89,9 @@ async function checkSavedMetadata(trackId) {
     console.log('\n📋 Checking saved metadata...');
     
     // Get recent tracks to verify metadata was saved
-    const response = await fetch(`${BASE_URL}/api/tracks?limit=1`);
+    const response = await fetch(`${BASE_URL}/api/tracks?limit=1`, {
+      headers: await bearerHeaders()
+    });
     const data = await response.json();
     
     if (data.tracks && data.tracks.length > 0) {
@@ -121,7 +123,9 @@ async function testStats() {
   try {
     console.log('\n📊 Testing stats endpoint...');
     
-    const response = await fetch(`${BASE_URL}/api/stats`);
+    const response = await fetch(`${BASE_URL}/api/stats`, {
+      headers: await bearerHeaders()
+    });
     const data = await response.json();
     
     console.log('   Stats:');

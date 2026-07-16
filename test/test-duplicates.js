@@ -1,6 +1,8 @@
 // Test script สำหรับทดสอบ duplicate removal
 // วิธีใช้: bun run test-duplicates.js
 
+import { bearerHeaders } from './_auth.js';
+
 const BASE_URL = 'http://localhost:3000';
 
 console.log('🧪 Testing Duplicate Management...\n');
@@ -9,7 +11,9 @@ async function checkDuplicateStats() {
   try {
     console.log('📊 Checking duplicate statistics...');
     
-    const response = await fetch(`${BASE_URL}/api/duplicates`);
+    const response = await fetch(`${BASE_URL}/api/duplicates`, {
+      headers: await bearerHeaders()
+    });
     const data = await response.json();
     
     console.log(`   Duplicate groups: ${data.duplicateGroups}`);
@@ -36,7 +40,8 @@ async function testDryRunRemoval() {
     console.log('\n🔍 Testing dry run duplicate removal...');
     
     const response = await fetch(`${BASE_URL}/api/duplicates?dryRun=true&details=true`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: await bearerHeaders()
     });
     
     const data = await response.json();
@@ -66,7 +71,8 @@ async function removeDuplicatesForReal() {
     console.log('\n🗑️  Removing duplicates for real...');
     
     const response = await fetch(`${BASE_URL}/api/duplicates`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: await bearerHeaders()
     });
     
     const data = await response.json();
@@ -92,9 +98,10 @@ async function checkStatsAfterCleanup() {
   try {
     console.log('\n📈 Checking stats after cleanup...');
     
+    const authHeaders = await bearerHeaders();
     const [statsResponse, tracksResponse] = await Promise.all([
-      fetch(`${BASE_URL}/api/stats`),
-      fetch(`${BASE_URL}/api/tracks?limit=5`)
+      fetch(`${BASE_URL}/api/stats`, { headers: authHeaders }),
+      fetch(`${BASE_URL}/api/tracks?limit=5`, { headers: authHeaders })
     ]);
     
     const [stats, tracks] = await Promise.all([

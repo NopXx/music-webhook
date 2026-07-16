@@ -1,6 +1,8 @@
 // Quick test สำหรับทดสอบ webhook หลังจากแก้ปัญหา 401
 // วิธีใช้: bun run quick-test.js
 
+import { apiKeyHeaders } from './_auth.js';
+
 const BASE_URL = 'http://localhost:3000';
 
 console.log('🧪 Quick Test - Webhook Endpoint...\n');
@@ -20,9 +22,7 @@ async function testWebhook() {
     
     const response = await fetch(`${BASE_URL}/webhook/scrobble`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: apiKeyHeaders(),
       body: JSON.stringify(testData)
     });
 

@@ -2,6 +2,7 @@
 
 // Test script สำหรับทดสอบ Spotify enrichment กับข้อมูลตัวอย่าง
 import { config } from 'dotenv';
+import { apiKeyHeaders, bearerHeaders } from './_auth.js';
 
 // Load environment variables
 config();
@@ -61,9 +62,7 @@ async function testSpotifyEnrichment() {
       // ส่งข้อมูล track ที่ขาดหายไปไปยัง webhook
       const response = await fetch(`${BASE_URL}/webhook/scrobble`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: apiKeyHeaders(),
         body: JSON.stringify({
           title: track.title,
           artist: track.artist,
@@ -110,7 +109,9 @@ async function checkEnrichmentResults() {
 
   try {
     // ดูสถิติ Spotify
-    const statsResponse = await fetch(`${BASE_URL}/api/spotify/stats`);
+    const statsResponse = await fetch(`${BASE_URL}/api/spotify/stats`, {
+      headers: await bearerHeaders()
+    });
     if (statsResponse.ok) {
       const stats = await statsResponse.json();
       console.log('📈 Spotify Statistics:');
@@ -123,7 +124,9 @@ async function checkEnrichmentResults() {
     }
 
     // ดูข้อมูล tracks ล่าสุด
-    const tracksResponse = await fetch(`${BASE_URL}/api/tracks?limit=10`);
+    const tracksResponse = await fetch(`${BASE_URL}/api/tracks?limit=10`, {
+      headers: await bearerHeaders()
+    });
     if (tracksResponse.ok) {
       const tracksData = await tracksResponse.json();
       console.log('🎵 Recent Tracks (showing enrichment status):');
@@ -148,7 +151,8 @@ async function manualEnrichment() {
 
   try {
     const response = await fetch(`${BASE_URL}/api/spotify/enrich?limit=10`, {
-      method: 'POST'
+      method: 'POST',
+      headers: await bearerHeaders()
     });
 
     if (response.ok) {
