@@ -12,6 +12,13 @@ import {
 } from '../utils/trackNormalizer.js';
 
 const scrobbleSchema = new mongoose.Schema({
+  // Owner of this listening event (per-user data isolation)
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true,
+  },
   track: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'TrackMeta',
@@ -122,6 +129,8 @@ const scrobbleSchema = new mongoose.Schema({
 scrobbleSchema.index({ scrobbledAt: -1 });
 scrobbleSchema.index({ timestamp: -1 });
 scrobbleSchema.index({ track: 1, scrobbledAt: -1 });
+scrobbleSchema.index({ user: 1, scrobbledAt: -1 });
+scrobbleSchema.index({ user: 1, track: 1 });
 scrobbleSchema.index({ source: 1 });
 scrobbleSchema.index({ connector: 1 });
 scrobbleSchema.index({ eventType: 1 });
@@ -138,10 +147,11 @@ scrobbleSchema.index({ eventType: 1 });
  * @param {number} windowMs - Dedup window in milliseconds (default 5 min).
  * @returns {Promise<boolean>}
  */
-scrobbleSchema.statics.isRecentDuplicate = async function (trackMetaId, timestamp, windowMs = 300000) {
+scrobbleSchema.statics.isRecentDuplicate = async function (trackMetaId, timestamp, windowMs = 300000, userId = null) {
   if (redis?.status === 'ready') {
     try {
-      const key = `dedup:scrobble:${trackMetaId}`;
+      // Scope the dedup key by user so one user's scrobble can't suppress another's
+      const key = `dedup:scrobble:${userId || 'anon'}:${trackMetaId}`;
       const ttlSec = Math.ceil(windowMs / 1000);
       const result = await redis.set(key, '1', 'NX', 'EX', ttlSec);
       return result === null; // null = key existed = duplicate
@@ -154,6 +164,7 @@ scrobbleSchema.statics.isRecentDuplicate = async function (trackMetaId, timestam
   const start = new Date(ts.getTime() - windowMs);
 
   const count = await this.countDocuments({
+    user: userId,
     track: trackMetaId,
     scrobbledAt: { $gte: start },
     eventType: 'scrobble',
@@ -188,6 +199,13 @@ scrobbleSchema.statics.findOrCreateScrobble = async function (trackData) {
       artist: trackData?.artist,
       title: trackData?.title,
     };
+  }
+
+  // Owner is required for per-user data isolation
+  const userId = trackData?.user;
+  if (!userId) {
+    console.warn('⚠️ Missing user on scrobble, skipping.');
+    return { action: 'skipped', eventType, reason: 'missing-user' };
   }
 
   // Normalize the incoming data
@@ -235,7 +253,8 @@ scrobbleSchema.statics.findOrCreateScrobble = async function (trackData) {
     const isDup = await this.isRecentDuplicate(
       trackMeta._id,
       data.scrobbledAt || data.timestamp,
-      10 * 60 * 1000 // 10 min window
+      10 * 60 * 1000, // 10 min window
+      userId
     );
     if (isDup) {
       console.log(`⏭️ Skipped duplicate: ${data.artist} - ${data.title}`);
@@ -251,6 +270,7 @@ scrobbleSchema.statics.findOrCreateScrobble = async function (trackData) {
 
   // ── Step 5: Create Scrobble ───────────────────
   const scrobble = await this.create({
+    user: userId,
     track: trackMeta._id,
     timestamp: data.timestamp,
     scrobbledAt: data.scrobbledAt,
@@ -288,8 +308,10 @@ scrobbleSchema.statics.findOrCreateScrobble = async function (trackData) {
 /**
  * Get recent scrobbles with populated track/artist/album data.
  */
-scrobbleSchema.statics.getRecentTracks = function (limit = 50) {
-  return this.find({ eventType: 'scrobble' })
+scrobbleSchema.statics.getRecentTracks = function (limit = 50, userId = null) {
+  const match = { eventType: 'scrobble' };
+  if (userId) match.user = userId;
+  return this.find(match)
     .sort({ scrobbledAt: -1 })
     .limit(limit)
     .populate({

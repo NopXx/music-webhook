@@ -3,12 +3,18 @@ import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
+import path from 'path';
 import Database from './config/database.js';
 import redis from './config/redis.js';
 import nowPlayingService from './services/nowPlayingService.js';
 import webhookRoutes from './routes/webhook.js';
+import openapiSpec from './config/openapi.js';
+import authService from './services/authService.js';
+import authController from './controllers/authController.js';
+import { authenticate, authenticatePage, authenticateClient, requireRole } from './middleware/auth.js';
 import { 
   validateTrackData, 
   validateApiKey, 
@@ -27,6 +33,33 @@ config();
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || 'localhost';
+
+// Swagger UI served from CDN, pointed at our /openapi.json spec.
+const SWAGGER_UI_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Music Webhook API — Docs</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css" />
+  <link rel="icon" href="data:," />
+  <style>body { margin: 0; } .topbar { display: none; }</style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: '/openapi.json',
+      dom_id: '#swagger-ui',
+      deepLinking: true,
+      docExpansion: 'list',
+      defaultModelsExpandDepth: 0,
+      tryItOutEnabled: true,
+    });
+  </script>
+</body>
+</html>`;
 
 class MusicWebhookServer {
   constructor() {
@@ -79,6 +112,9 @@ class MusicWebhookServer {
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+    // Cookie parsing (for JWT-in-cookie auth on browser page navigation)
+    this.app.use(cookieParser());
+
     // Debug middleware (development only) - after body parsing
     if (process.env.NODE_ENV === 'development') {
       this.app.use(debugMiddleware);
@@ -97,66 +133,108 @@ class MusicWebhookServer {
   }
 
   setupRoutes() {
-    // Root endpoint
-    this.app.get('/', webhookRoutes.handleRoot);
+    // API documentation
+    const refPath = () => path.join(path.dirname(fileURLToPath(import.meta.url)), 'public', 'reference.html');
+    this.app.get('/openapi.json', (req, res) => res.json(openapiSpec));
+    // Last.fm-style reference portal (rendered from /openapi.json)
+    this.app.get(['/docs', '/reference'], (req, res) => res.sendFile(refPath()));
+    // Swagger UI for interactive try-it-out
+    this.app.get(['/docs/swagger', '/api-docs'], (req, res) => {
+      res.type('html').send(SWAGGER_UI_HTML);
+    });
+
+    // Root — serve the API reference portal to browsers, JSON to API clients
+    this.app.get('/', (req, res, next) => {
+      if (req.accepts(['html', 'json']) === 'html') {
+        return res.sendFile(refPath(), (err) => {
+          if (err) webhookRoutes.handleRoot(req, res);
+        });
+      }
+      return webhookRoutes.handleRoot(req, res);
+    });
 
     // Health check endpoints
     this.app.get('/health', webhookRoutes.healthCheck);
     this.app.get('/api/health', webhookRoutes.healthCheck);
 
+    // ── Auth ──────────────────────────────────
+    this.app.get('/login', (req, res) => {
+      res.sendFile(path.join(path.dirname(fileURLToPath(import.meta.url)), 'views', 'login.html'));
+    });
+    this.app.post('/api/auth/register', validateContentType, asyncHandler(authController.register));
+    this.app.post('/api/auth/login', validateContentType, asyncHandler(authController.login));
+    this.app.post('/api/auth/logout', authController.logout);
+    this.app.get('/api/auth/me', authenticate, asyncHandler(authController.me));
+    this.app.post('/api/auth/api-keys', authenticate, validateContentType, asyncHandler(authController.createApiKey));
+    this.app.get('/api/auth/api-keys', authenticate, asyncHandler(authController.listApiKeys));
+    this.app.delete('/api/auth/api-keys/:id', authenticate, asyncHandler(authController.revokeApiKey));
+
     // Webhook endpoints (with validation)
-    this.app.post('/webhook/scrobble', 
+    // Scrobble intake — API key (scrobbler clients) or JWT
+    this.app.post('/webhook/scrobble',
+      authenticateClient,
       validateContentType,
       debugWebhookData,
       validateTrackData,
       asyncHandler(webhookRoutes.handleScrobble)
     );
-    this.app.post('/webhook', 
+    this.app.post('/webhook',
+      authenticateClient,
       validateContentType,
       debugWebhookData,
       validateTrackData,
       asyncHandler(webhookRoutes.handleScrobble)
     );
 
-    // API endpoints
-    this.app.get('/api/stats', asyncHandler(webhookRoutes.getStats));
-    this.app.get('/api/tracks', asyncHandler(webhookRoutes.getRecentTracks));
+    // ── Analytics reads — any logged-in user, scoped to their own data ──
+    this.app.get('/api/stats', authenticate, asyncHandler(webhookRoutes.getStats));
+    this.app.get('/api/tracks', authenticate, asyncHandler(webhookRoutes.getRecentTracks));
+    this.app.get('/api/tracks/top-artists', authenticate, asyncHandler(webhookRoutes.getTopArtistsLeaderboard));
+    this.app.get('/api/tracks/top-tracks', authenticate, asyncHandler(webhookRoutes.getTopTracksLeaderboard));
+    this.app.get('/api/track', authenticate, asyncHandler(webhookRoutes.getTrackAnalytics));
+    this.app.get('/api/albums', authenticate, asyncHandler(webhookRoutes.getAlbumAnalytics));
+    this.app.get('/api/artists/:name', authenticate, asyncHandler(webhookRoutes.getArtistProfile));
+    this.app.get('/api/nowplaying', authenticate, asyncHandler(webhookRoutes.getNowPlaying));
+
+    // Now-playing intake — API key or JWT
+    this.app.post('/api/nowplaying/playing', authenticateClient, validateContentType, asyncHandler(webhookRoutes.setNowPlaying));
+
+    // ── Admin-only writes / maintenance ──
     this.app.patch('/api/tracks',
+      authenticate, requireRole('admin'),
       validateContentType,
       asyncHandler(webhookRoutes.updateTrackLovedStatus)
     );
-    this.app.get('/api/tracks/top-artists', asyncHandler(webhookRoutes.getTopArtistsLeaderboard));
-    this.app.get('/api/tracks/top-tracks', asyncHandler(webhookRoutes.getTopTracksLeaderboard));
-    this.app.get('/api/track', asyncHandler(webhookRoutes.getTrackAnalytics));
-    this.app.get('/api/albums', asyncHandler(webhookRoutes.getAlbumAnalytics));
-    this.app.get('/api/artists/:name', asyncHandler(webhookRoutes.getArtistProfile));
-    this.app.get('/api/nowplaying', asyncHandler(webhookRoutes.getNowPlaying));
-    this.app.post('/api/nowplaying/playing', validateContentType, asyncHandler(webhookRoutes.setNowPlaying));
-    this.app.get('/import/listenbrainz', webhookRoutes.renderListenBrainzImportPage);
+    this.app.delete('/api/tracks/range',
+      authenticate, requireRole('admin'),
+      asyncHandler(webhookRoutes.deleteTracksByDateRange)
+    );
+
+    // Import (admin)
+    this.app.get('/import/listenbrainz', authenticatePage, requireRole('admin'), webhookRoutes.renderListenBrainzImportPage);
     this.app.post('/api/import/listenbrainz',
+      authenticate, requireRole('admin'),
       validateContentType,
       asyncHandler(webhookRoutes.importListenBrainz)
     );
-    this.app.delete('/api/tracks/range',
-      asyncHandler(webhookRoutes.deleteTracksByDateRange)
-    );
-    
-    // Duplicate management endpoints
-    this.app.get('/api/duplicates', asyncHandler(webhookRoutes.getDuplicateStats));
-    this.app.delete('/api/duplicates', asyncHandler(webhookRoutes.removeDuplicates));
-    
-    // Spotify integration endpoints
-    this.app.get('/api/spotify/status', asyncHandler(webhookRoutes.getSpotifyStatus));
-    this.app.get('/api/spotify/stats', asyncHandler(webhookRoutes.getSpotifyStats));
-    this.app.post('/api/spotify/enrich', asyncHandler(webhookRoutes.enrichTracksWithSpotify));
-    this.app.post('/api/spotify/update-missing', asyncHandler(webhookRoutes.updateMissingSpotifyData));
-    this.app.delete('/api/spotify/cache', asyncHandler(webhookRoutes.clearSpotifyCache));
 
-    // Migration endpoints
-    this.app.get('/migrate', webhookRoutes.renderMigratePage);
-    this.app.get('/inspect', webhookRoutes.renderInspectPage);
-    this.app.get('/api/migrate/precheck', asyncHandler(webhookRoutes.migrationPrecheck));
+    // Duplicate management (admin, scoped to own data)
+    this.app.get('/api/duplicates', authenticate, requireRole('admin'), asyncHandler(webhookRoutes.getDuplicateStats));
+    this.app.delete('/api/duplicates', authenticate, requireRole('admin'), asyncHandler(webhookRoutes.removeDuplicates));
+
+    // Spotify integration — reads for any user, mutations admin-only
+    this.app.get('/api/spotify/status', authenticate, asyncHandler(webhookRoutes.getSpotifyStatus));
+    this.app.get('/api/spotify/stats', authenticate, asyncHandler(webhookRoutes.getSpotifyStats));
+    this.app.post('/api/spotify/enrich', authenticate, requireRole('admin'), asyncHandler(webhookRoutes.enrichTracksWithSpotify));
+    this.app.post('/api/spotify/update-missing', authenticate, requireRole('admin'), asyncHandler(webhookRoutes.updateMissingSpotifyData));
+    this.app.delete('/api/spotify/cache', authenticate, requireRole('admin'), asyncHandler(webhookRoutes.clearSpotifyCache));
+
+    // Migration endpoints (admin)
+    this.app.get('/migrate', authenticatePage, requireRole('admin'), webhookRoutes.renderMigratePage);
+    this.app.get('/inspect', authenticatePage, requireRole('admin'), webhookRoutes.renderInspectPage);
+    this.app.get('/api/migrate/precheck', authenticate, requireRole('admin'), asyncHandler(webhookRoutes.migrationPrecheck));
     this.app.post('/api/migrate/run',
+      authenticate, requireRole('admin'),
       validateContentType,
       webhookRoutes.runMigration  // Not wrapped in asyncHandler — handles its own streaming
     );
@@ -167,6 +245,12 @@ class MusicWebhookServer {
         message: 'Music Webhook API',
         version: '1.0.2',
         endpoints: {
+          'GET /docs': 'Interactive API documentation (Swagger UI)',
+          'GET /openapi.json': 'OpenAPI 3.0 specification',
+          'POST /api/auth/register': 'Register a new user (viewer)',
+          'POST /api/auth/login': 'Log in and receive a JWT',
+          'GET /api/auth/me': 'Current authenticated user',
+          'POST /api/auth/api-keys': 'Create an API key for scrobbler clients',
           'GET /api/stats': 'Get scrobbling statistics',
           'GET /api/tracks': 'Get tracks with pagination/search',
           'PATCH /api/tracks': 'Toggle loved flag for a track',
@@ -257,6 +341,9 @@ class MusicWebhookServer {
 
       // Restore now-playing state from Redis
       await nowPlayingService.hydrate();
+
+      // Seed the admin user from env (idempotent)
+      await authService.seedAdmin();
 
       // Start the server
       const server = this.app.listen(PORT, () => {

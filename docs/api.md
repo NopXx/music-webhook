@@ -2,6 +2,8 @@
 
 Base URL: `http://localhost:3000` (default)
 
+> **Interactive docs:** run the server and open [`/docs`](http://localhost:3000/docs) for live Swagger UI (try-it-out enabled). The machine-readable spec is at [`/openapi.json`](http://localhost:3000/openapi.json), defined in [`config/openapi.js`](../config/openapi.js) — keep it in sync when changing endpoints.
+
 ## Root & Info
 
 | Method | Endpoint | Description |

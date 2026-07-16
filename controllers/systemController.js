@@ -6,6 +6,8 @@ import mongoose from 'mongoose';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildNormalizedTrackData, cleanAlbumName } from '../utils/trackNormalizer.js';
+import User from '../models/User.js';
+import { toObjectId } from '../utils/objectId.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -118,7 +120,9 @@ class SystemController {
    */
   async getDuplicateStats(req, res) {
     try {
+      const userId = toObjectId(req.user?.id);
       const duplicateStats = await Scrobble.aggregate([
+        { $match: { user: userId } },
         {
           $lookup: {
             from: 'trackmetas',
@@ -158,8 +162,9 @@ class SystemController {
           $limit: 20
         }
       ]);
-      
+
       const totalDuplicates = await Scrobble.aggregate([
+        { $match: { user: userId } },
         {
           $lookup: {
             from: 'trackmetas',
@@ -226,9 +231,11 @@ class SystemController {
   async removeDuplicates(req, res) {
     try {
       const dryRun = req.query.dryRun === 'true';
-      
-      // Find duplicates: same artist, title, connector within 5 minutes
+      const userId = toObjectId(req.user?.id);
+
+      // Find duplicates: same track, connector within 5 minutes (scoped to this user)
       const duplicates = await Scrobble.aggregate([
+        { $match: { user: userId } },
         {
           $group: {
             _id: {
@@ -333,6 +340,7 @@ class SystemController {
       }
 
       const filter = {
+        user: toObjectId(req.user?.id),
         scrobbledAt: {
           $gte: startDate,
           $lte: endDate
@@ -511,6 +519,15 @@ class SystemController {
     };
 
     try {
+      // Legacy tracks have no owner — assign them to the admin running the migration.
+      const adminUser = await User.findById(req.user?.id) || await User.findOne({ role: 'admin' }).sort({ createdAt: 1 });
+      if (!adminUser) {
+        send({ type: 'error', docId: 'fatal', message: 'No admin user to own migrated scrobbles' });
+        send({ type: 'done', ...stats });
+        return res.end();
+      }
+      const ownerId = adminUser._id;
+
       const db = mongoose.connection.db;
       const oldTracks = db.collection('tracks');
 
@@ -575,6 +592,7 @@ class SystemController {
 
           if (!isDryRun) {
             await Scrobble.create({
+              user: ownerId,
               track: trackMeta._id,
               timestamp: doc.timestamp || doc.scrobbledAt || new Date(),
               scrobbledAt: doc.scrobbledAt || doc.timestamp || new Date(),

@@ -1,26 +1,38 @@
-// Multi-source Now Playing state manager
-// Each scrobbler source (web-scrobbler, listenbrainz, custom apps, ...) keeps
-// its own slot in `this.sources`. A single "primary" source is surfaced through
-// `getStatus()` / `current`, chosen with a sticky policy so concurrent
-// scrobblers don't flicker the displayed track.
+// Multi-source, multi-user Now Playing state manager.
+//
+// State is partitioned per user. Within each user, every scrobbler source
+// (web-scrobbler, listenbrainz, custom apps, ...) keeps its own slot. A single
+// "primary" source per user is surfaced through getStatus(userId), chosen with
+// a sticky policy so concurrent scrobblers don't flicker the displayed track.
 import redis from '../config/redis.js';
 
-const REDIS_KEY = 'nowplaying:state';
-const REDIS_TTL = 86400;                // 1 day Redis TTL
-const STALE_MS = 60 * 1000;             // heartbeat window for "active"
-const CLEANUP_MS = 30 * 60 * 1000;      // drop a source after this idle
+const REDIS_PREFIX = 'nowplaying:state:';      // per-user: nowplaying:state:<userId>
+const REDIS_TTL = 86400;                       // 1 day Redis TTL
+const STALE_MS = 60 * 1000;                    // heartbeat window for "active"
+const CLEANUP_MS = 30 * 60 * 1000;             // drop a source after this idle
 const HYDRATE_STALE_MS = 10 * 60 * 1000;
 
-class NowPlayingService {
-  constructor() {
+const reviveEntry = (entry) => {
+  if (!entry) return null;
+  if (entry.startedAt) entry.startedAt = new Date(entry.startedAt);
+  if (entry.lastUpdate) entry.lastUpdate = new Date(entry.lastUpdate);
+  return entry;
+};
+
+/**
+ * Holds the now-playing state for a single user. All the sticky-primary,
+ * progress, and caching logic lives here; the parent service routes by userId.
+ */
+class UserNowPlaying {
+  constructor(onChange) {
     this.sources = new Map();       // sourceKey -> sourceState
     this._primaryKey = null;
     this._version = 0;
     this._cachedStatus = null;
     this._cachedAt = 0;
+    this._onChange = onChange || (() => {});
   }
 
-  /** Backwards-compat getter — many callers read `service.current?.track` */
   get current() {
     return this._primaryKey ? (this.sources.get(this._primaryKey) || null) : null;
   }
@@ -32,68 +44,54 @@ class NowPlayingService {
     return conn ? `${src}:${conn}`.toLowerCase() : src.toLowerCase();
   }
 
-  async hydrate() {
-    if (!redis || redis.status !== 'ready') return;
-    try {
-      const raw = await redis.get(REDIS_KEY);
-      if (!raw) return;
-      const state = JSON.parse(raw);
-
-      const reviveEntry = (entry) => {
-        if (!entry) return null;
-        if (entry.startedAt) entry.startedAt = new Date(entry.startedAt);
-        if (entry.lastUpdate) entry.lastUpdate = new Date(entry.lastUpdate);
-        return entry;
-      };
-
-      // New format: { sources: [[k,v],...], _primaryKey, _version }
-      if (Array.isArray(state.sources)) {
-        const now = Date.now();
-        for (const [key, entry] of state.sources) {
-          const revived = reviveEntry(entry);
-          if (!revived) continue;
-          const age = now - (revived.lastUpdate?.getTime() || 0);
-          if (age > HYDRATE_STALE_MS) continue;
-          this.sources.set(key, revived);
-        }
-        this._primaryKey = state._primaryKey && this.sources.has(state._primaryKey)
-          ? state._primaryKey
-          : null;
-        this._version = state._version || 0;
-        if (this.sources.size > 0) {
-          this._recomputePrimary();
-          console.log(`♻️ NowPlaying restored ${this.sources.size} source(s) from Redis (v${this._version})`);
-        }
-        return;
-      }
-
-      // Legacy format: { current, _version }
-      if (state.current) {
-        const revived = reviveEntry(state.current);
-        const age = Date.now() - (revived.lastUpdate?.getTime() || 0);
-        if (age > HYDRATE_STALE_MS) {
-          console.log('ℹ️ NowPlaying state too stale — starting idle');
-          return;
-        }
-        const key = String(revived.source || 'unknown').toLowerCase();
-        this.sources.set(key, revived);
-        this._primaryKey = key;
-        this._version = state._version || 0;
-        console.log(`♻️ NowPlaying restored (legacy) from Redis (v${this._version})`);
-      }
-    } catch (err) {
-      console.warn('⚠️ NowPlaying hydration failed:', err.message);
-    }
+  _persist() {
+    this._onChange();
   }
 
-  _persist() {
-    if (!redis || redis.status !== 'ready') return;
-    const payload = JSON.stringify({
+  serialize() {
+    return {
       sources: Array.from(this.sources.entries()),
       _primaryKey: this._primaryKey,
       _version: this._version,
-    });
-    redis.set(REDIS_KEY, payload, 'EX', REDIS_TTL).catch(() => {});
+    };
+  }
+
+  /** Load state produced by serialize(). Returns true if any source survived. */
+  loadFrom(state) {
+    if (!state) return false;
+    const now = Date.now();
+
+    if (Array.isArray(state.sources)) {
+      for (const [key, entry] of state.sources) {
+        const revived = reviveEntry(entry);
+        if (!revived) continue;
+        const age = now - (revived.lastUpdate?.getTime() || 0);
+        if (age > HYDRATE_STALE_MS) continue;
+        this.sources.set(key, revived);
+      }
+      this._primaryKey = state._primaryKey && this.sources.has(state._primaryKey)
+        ? state._primaryKey
+        : null;
+      this._version = state._version || 0;
+      if (this.sources.size > 0) {
+        this._recomputePrimary();
+        return true;
+      }
+      return false;
+    }
+
+    // Legacy single-source format: { current, _version }
+    if (state.current) {
+      const revived = reviveEntry(state.current);
+      const age = now - (revived.lastUpdate?.getTime() || 0);
+      if (age > HYDRATE_STALE_MS) return false;
+      const key = String(revived.source || 'unknown').toLowerCase();
+      this.sources.set(key, revived);
+      this._primaryKey = key;
+      this._version = state._version || 0;
+      return true;
+    }
+    return false;
   }
 
   _isActive(entry) {
@@ -109,58 +107,36 @@ class NowPlayingService {
     return age <= STALE_MS;
   }
 
-  /**
-   * Pick the source surfaced to consumers. Sticky to the current primary
-   * while it's still actively playing — that's what prevents flicker when a
-   * second scrobbler concurrently sends a different track.
-   */
   _recomputePrimary() {
     const prev = this._primaryKey;
-
-    // Drop entries the consumer would never care about anymore.
     this._cleanupStale();
 
-    // Stick to current primary if still actively playing.
     if (prev && this._isActive(this.sources.get(prev))) {
       return;
     }
 
-    // Pick freshest playing source.
     let bestKey = null;
     let bestUpdate = -Infinity;
     for (const [key, entry] of this.sources) {
       if (!this._isActive(entry)) continue;
       const t = entry.lastUpdate?.getTime?.() || 0;
-      if (t > bestUpdate) {
-        bestUpdate = t;
-        bestKey = key;
-      }
+      if (t > bestUpdate) { bestUpdate = t; bestKey = key; }
     }
 
-    // Fallback: freshest paused/stopped (still within heartbeat window).
     if (!bestKey) {
       for (const [key, entry] of this.sources) {
         if (!this._isFresh(entry)) continue;
         const t = entry.lastUpdate?.getTime?.() || 0;
-        if (t > bestUpdate) {
-          bestUpdate = t;
-          bestKey = key;
-        }
+        if (t > bestUpdate) { bestUpdate = t; bestKey = key; }
       }
     }
 
-    // Final fallback: keep last known primary even if stale, so UI shows
-    // "what last played" instead of going blank between sessions.
     if (!bestKey && prev && this.sources.has(prev)) {
       bestKey = prev;
     } else if (!bestKey) {
-      // Pick the freshest entry overall, regardless of staleness.
       for (const [key, entry] of this.sources) {
         const t = entry.lastUpdate?.getTime?.() || 0;
-        if (t > bestUpdate) {
-          bestUpdate = t;
-          bestKey = key;
-        }
+        if (t > bestUpdate) { bestUpdate = t; bestKey = key; }
       }
     }
 
@@ -190,7 +166,6 @@ class NowPlayingService {
     return this._version;
   }
 
-  /** Reset every source to idle. */
   setIdle() {
     this.sources.clear();
     this._primaryKey = null;
@@ -263,19 +238,14 @@ class NowPlayingService {
     this._persist();
   }
 
-  /**
-   * Pause an active source. With no trackData (manual `/player/pause`), falls
-   * back to the current primary so single-source UX still works.
-   */
   setPaused(trackData) {
     const d = trackData || {};
     const now = new Date();
     const explicitKey = d.source || d.connector ? this._sourceKey(d) : null;
     const key = explicitKey || this._primaryKey;
-    if (!key) return; // nothing to pause
+    if (!key) return;
 
     const prev = this.sources.get(key);
-
     const explicitProgress = typeof d.currentTime === 'number' ? d.currentTime : null;
     const progress = explicitProgress ??
       (prev?.startedAt ? Math.floor((now - prev.startedAt) / 1000) :
@@ -324,7 +294,6 @@ class NowPlayingService {
     this._persist();
   }
 
-  /** Refresh the primary source's progress without changing identity. */
   refreshPlaying({ currentTime = null, duration = null } = {}) {
     const now = new Date();
     const primary = this.current;
@@ -354,18 +323,11 @@ class NowPlayingService {
     this._persist();
   }
 
-  forcePlaying(trackData = {}) {
-    this.setPlaying(trackData || {});
-  }
-
   updateFromEvent(trackData) {
     const type = (trackData.eventType || '').toLowerCase();
-
     if (type === 'paused') { this.setPaused(trackData); return; }
     if (type === 'stopped') { this.setStopped(trackData); return; }
-
     if (!trackData.title || !trackData.artist) return;
-
     if (type === 'nowplaying' || type === 'resumed' || type === 'resumedplaying' || type === 'scrobble') {
       this.setPlaying(trackData);
     }
@@ -377,7 +339,6 @@ class NowPlayingService {
       return this._cachedStatus;
     }
 
-    // Re-evaluate primary in case stickiness expired since the last write.
     this._recomputePrimary();
 
     const primary = this.current;
@@ -433,6 +394,95 @@ class NowPlayingService {
     this._cachedStatus = result;
     this._cachedAt = nowMs;
     return result;
+  }
+}
+
+const IDLE_STATUS = { playing: false, status: 'unknown', updatedAt: null, track: null };
+
+/**
+ * Routes now-playing operations to a per-user UserNowPlaying instance and
+ * handles per-user Redis persistence + hydration.
+ */
+class NowPlayingService {
+  constructor() {
+    this.users = new Map();   // userId -> UserNowPlaying
+  }
+
+  _key(userId) {
+    return String(userId);
+  }
+
+  _persistUser(userId, state) {
+    if (!redis || redis.status !== 'ready') return;
+    const payload = JSON.stringify(state.serialize());
+    redis.set(`${REDIS_PREFIX}${this._key(userId)}`, payload, 'EX', REDIS_TTL).catch(() => {});
+  }
+
+  /** Get (or lazily create) the state container for a user. */
+  _get(userId) {
+    const key = this._key(userId);
+    let state = this.users.get(key);
+    if (!state) {
+      state = new UserNowPlaying(() => this._persistUser(key, state));
+      this.users.set(key, state);
+    }
+    return state;
+  }
+
+  /** Get a user's state only if it already exists (no side effects). */
+  _peek(userId) {
+    return this.users.get(this._key(userId)) || null;
+  }
+
+  // ── Delegated, user-scoped API ───────────────
+  setPlaying(userId, trackData) { this._get(userId).setPlaying(trackData); }
+  setPaused(userId, trackData) { this._get(userId).setPaused(trackData); }
+  setStopped(userId, trackData) { this._get(userId).setStopped(trackData); }
+  refreshPlaying(userId, opts) { this._get(userId).refreshPlaying(opts); }
+  updateFromEvent(userId, trackData) { this._get(userId).updateFromEvent(trackData); }
+  attachEnrichment(userId, data) { this._get(userId).attachEnrichment(data); }
+  setIdle(userId) { this._get(userId).setIdle(); }
+
+  getVersion(userId) {
+    const state = this._peek(userId);
+    return state ? state.getVersion() : 0;
+  }
+
+  /** The raw primary entry for a user (used by enrichment guards). */
+  getCurrent(userId) {
+    const state = this._peek(userId);
+    return state ? state.current : null;
+  }
+
+  getStatus(userId) {
+    const state = this._peek(userId);
+    return state ? state.getStatus() : { ...IDLE_STATUS };
+  }
+
+  /** Restore all users' state from Redis on boot. */
+  async hydrate() {
+    if (!redis || redis.status !== 'ready') return;
+    try {
+      const keys = await redis.keys(`${REDIS_PREFIX}*`);
+      let restored = 0;
+      for (const redisKey of keys) {
+        const userId = redisKey.slice(REDIS_PREFIX.length);
+        const raw = await redis.get(redisKey);
+        if (!raw) continue;
+        let parsed;
+        try { parsed = JSON.parse(raw); } catch { continue; }
+        const state = new UserNowPlaying(() => this._persistUser(userId, state));
+        if (state.loadFrom(parsed)) {
+          this.users.set(userId, state);
+          restored++;
+        }
+      }
+      if (restored > 0) {
+        console.log(`♻️ NowPlaying restored state for ${restored} user(s) from Redis`);
+      }
+    } catch (err) {
+      console.warn('⚠️ NowPlaying hydration failed:', err.message);
+    }
   }
 }
 

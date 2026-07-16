@@ -27,7 +27,8 @@ class AnalyticsController {
         range,
         offset,
         recentLimit,
-        topArtistLimit: Number(req.query.topArtistLimit) || 5
+        topArtistLimit: Number(req.query.topArtistLimit) || 5,
+        userId: req.user.id
       });
 
       let spotifyStats = null;
@@ -96,7 +97,8 @@ class AnalyticsController {
         connector: req.query.connector,
         source: req.query.source,
         range: req.query.range,
-        rangeOffset: req.query.rangeOffset
+        rangeOffset: req.query.rangeOffset,
+        userId: req.user.id
       });
 
       res.status(200).json(listing);
@@ -123,7 +125,8 @@ class AnalyticsController {
       const leaderboard = await fetchTopArtistsLeaderboard({
         range,
         offset,
-        limit
+        limit,
+        userId: req.user.id
       });
 
       res.status(200).json(leaderboard);
@@ -148,7 +151,8 @@ class AnalyticsController {
       const leaderboard = await fetchTopTracksLeaderboard({
         range,
         offset,
-        limit
+        limit,
+        userId: req.user.id
       });
 
       res.status(200).json(leaderboard);
@@ -178,7 +182,8 @@ class AnalyticsController {
         artist,
         title,
         recentLimit: Number.isFinite(Number(recentLimit)) ? Number(recentLimit) : 12,
-        timezone: tz
+        timezone: tz,
+        userId: req.user.id
       });
 
       if (!insights) {
@@ -222,7 +227,8 @@ class AnalyticsController {
         artist,
         album,
         recentLimit: Number.isFinite(Number(recentLimit)) ? Number(recentLimit) : 12,
-        timezone: tz
+        timezone: tz,
+        userId: req.user.id
       });
 
       if (!insights) {
@@ -274,7 +280,8 @@ class AnalyticsController {
         name: decodedName,
         tz,
         topLimit: Number.isFinite(Number(limit)) ? Number(limit) : 10,
-        recentLimit: Number.isFinite(Number(recentLimit)) ? Number(recentLimit) : 15
+        recentLimit: Number.isFinite(Number(recentLimit)) ? Number(recentLimit) : 15,
+        userId: req.user.id
       });
 
       if (!profile) {

@@ -8,7 +8,7 @@ class PlayerController {
    * Optimized with ETag / 304 Not Modified support
    */
   getNowPlaying(req, res) {
-    const status = nowPlayingService.getStatus();
+    const status = nowPlayingService.getStatus(req.user.id);
 
     // Generate ETag from lastUpdate timestamp (changes when state changes)
     const etag = `"np-${status.updatedAt ? new Date(status.updatedAt).getTime() : 0}"`;
@@ -41,8 +41,9 @@ class PlayerController {
    */
   setNowPlaying(req, res) {
     try {
+      const userId = req.user.id;
       const { state, track } = req.body;
-      
+
       if (!state || !['playing', 'paused', 'stopped'].includes(state)) {
         return res.status(400).json({
           error: 'Invalid state',
@@ -58,21 +59,21 @@ class PlayerController {
       }
 
       if (state === 'playing') {
-        nowPlayingService.setPlaying(track);
+        nowPlayingService.setPlaying(userId, track);
 
         // Background: enrich with Apple Music animated artwork (fire-and-forget)
         // Skip if track already has animationUrl; use version guard to prevent stale results
-        const trackHasArtwork = nowPlayingService.current?.track?.animationUrl;
+        const trackHasArtwork = nowPlayingService.getCurrent(userId)?.track?.animationUrl;
         if (track.title && track.artist && !trackHasArtwork) {
-          this._enrichNowPlayingArtwork(track.title, track.artist, track.album);
+          this._enrichNowPlayingArtwork(userId, track.title, track.artist, track.album);
         }
       } else if (state === 'paused') {
-        nowPlayingService.setPaused();
+        nowPlayingService.setPaused(userId, {});
       } else {
-        nowPlayingService.setStopped();
+        nowPlayingService.setStopped(userId, {});
       }
 
-      const status = nowPlayingService.getStatus();
+      const status = nowPlayingService.getStatus(userId);
       res.status(200).json({
         success: true,
         message: `Now playing status updated to ${state}`,
@@ -92,13 +93,13 @@ class PlayerController {
    * Background: fetch Apple Music animated artwork and patch into
    * the in-memory now-playing track (fire-and-forget).
    */
-  _enrichNowPlayingArtwork(title, artist, album = '') {
-    const version = nowPlayingService.getVersion();
+  _enrichNowPlayingArtwork(userId, title, artist, album = '') {
+    const version = nowPlayingService.getVersion(userId);
     appleMusicService.fetchAnimatedArtwork(title, artist, album)
       .then(result => {
-        if (nowPlayingService.getVersion() !== version) return;
-        if (result.success && result.animationUrl && nowPlayingService.current?.track) {
-          nowPlayingService.attachEnrichment({
+        if (nowPlayingService.getVersion(userId) !== version) return;
+        if (result.success && result.animationUrl && nowPlayingService.getCurrent(userId)?.track) {
+          nowPlayingService.attachEnrichment(userId, {
             animationUrl: result.animationUrl,
             appleMusicUrl: result.appleMusicUrl,
           });

@@ -1,8 +1,10 @@
+import mongoose from 'mongoose';
 import Scrobble from '../models/Scrobble.js';
 import TrackMeta from '../models/TrackMeta.js';
 import Artist from '../models/Artist.js';
 import Album from '../models/Album.js';
 import { resolveArtistImage } from './artistImageService.js';
+import { toObjectId, userScope } from '../utils/objectId.js';
 
 const RANGE_CONFIG = {
   week: { ms: 7 * 24 * 60 * 60 * 1000 },
@@ -278,11 +280,13 @@ export const getStatsOverview = async ({
   range = 'all-time',
   offset = 0,
   recentLimit = 10,
-  topArtistLimit = 5
+  topArtistLimit = 5,
+  userId = null
 } = {}) => {
   const { match: rangeMatch, window } = buildRangeMatch(range, offset);
   const baseMatch = {
     eventType: 'scrobble',
+    ...userScope(userId),
     ...(rangeMatch || {})
   };
 
@@ -414,7 +418,8 @@ export const getTracksListing = async ({
   connector,
   source,
   range = 'all-time',
-  rangeOffset = 0
+  rangeOffset = 0,
+  userId = null
 } = {}) => {
   const sanitizedLimit = safeLimit(limit);
   const sanitizedPage = safePage(page);
@@ -428,6 +433,7 @@ export const getTracksListing = async ({
 
   const scrobbleMatch = {
     eventType: 'scrobble',
+    ...userScope(userId),
     ...(rangeMatch || {})
   };
   if (connector) scrobbleMatch.connector = connector;
@@ -492,6 +498,7 @@ export const getTracksListing = async ({
     tracks.map(async (scrobble) => {
       const playCount = await Scrobble.countDocuments({
         eventType: 'scrobble',
+        ...userScope(userId),
         track: scrobble.track
       });
       return {
@@ -538,7 +545,7 @@ export const getTracksListing = async ({
 // Update Loved Status
 // ──────────────────────────────────────────────
 
-export const updateLovedTrackStatus = async ({ id, isLoved }) => {
+export const updateLovedTrackStatus = async ({ id, isLoved, userId = null }) => {
   if (!id) {
     throw new Error('Track id is required');
   }
@@ -546,8 +553,13 @@ export const updateLovedTrackStatus = async ({ id, isLoved }) => {
     throw new Error('isLoved must be a boolean value');
   }
 
-  const scrobble = await Scrobble.findByIdAndUpdate(
-    id,
+  // Scope to the owner so a user can't toggle someone else's scrobble
+  const filter = { _id: id };
+  const oid = toObjectId(userId);
+  if (oid) filter.user = oid;
+
+  const scrobble = await Scrobble.findOneAndUpdate(
+    filter,
     { $set: { isLoved } },
     { new: true }
   );
@@ -566,12 +578,14 @@ export const updateLovedTrackStatus = async ({ id, isLoved }) => {
 export const getTopArtistsLeaderboard = async ({
   range = 'all-time',
   offset = 0,
-  limit = 10
+  limit = 10,
+  userId = null
 } = {}) => {
   const sanitizedLimit = safeLimit(limit, 10, 100);
   const { match: rangeMatch, window } = buildRangeMatch(range, offset);
   const baseMatch = {
     eventType: 'scrobble',
+    ...userScope(userId),
     ...(rangeMatch || {})
   };
 
@@ -625,12 +639,14 @@ export const getTopArtistsLeaderboard = async ({
 export const getTopTracksLeaderboard = async ({
   range = 'all-time',
   offset = 0,
-  limit = 15
+  limit = 15,
+  userId = null
 } = {}) => {
   const sanitizedLimit = safeLimit(limit, 15, 100);
   const { match: rangeMatch, window } = buildRangeMatch(range, offset);
   const baseMatch = {
     eventType: 'scrobble',
+    ...userScope(userId),
     ...(rangeMatch || {})
   };
 
@@ -691,7 +707,8 @@ export const getTrackInsights = async ({
   artist,
   title,
   timezone = DEFAULT_TIMEZONE,
-  recentLimit = 12
+  recentLimit = 12,
+  userId = null
 }) => {
   if (!artist || !title) {
     throw new Error('artist and title are required');
@@ -715,6 +732,7 @@ export const getTrackInsights = async ({
 
   const baseMatch = {
     eventType: 'scrobble',
+    ...userScope(userId),
     track: trackMeta._id
   };
 
@@ -846,7 +864,8 @@ export const getTrackInsights = async ({
   const related = await Scrobble.aggregate([
     {
       $match: {
-        eventType: 'scrobble'
+        eventType: 'scrobble',
+        ...userScope(userId)
       }
     },
     {
@@ -938,7 +957,8 @@ export const getAlbumInsights = async ({
   artist,
   album,
   recentLimit = 12,
-  timezone = DEFAULT_TIMEZONE
+  timezone = DEFAULT_TIMEZONE,
+  userId = null
 }) => {
   if (!artist || !album) {
     throw new Error('artist and album are required');
@@ -963,6 +983,7 @@ export const getAlbumInsights = async ({
 
   const baseMatch = {
     eventType: 'scrobble',
+    ...userScope(userId),
     track: { $in: trackMetaIds }
   };
 
@@ -1084,7 +1105,8 @@ export const getArtistProfileData = async ({
   name,
   tz = DEFAULT_TIMEZONE,
   topLimit = 10,
-  recentLimit = 15
+  recentLimit = 15,
+  userId = null
 }) => {
   if (!name) {
     throw new Error('artist name is required');
@@ -1103,6 +1125,7 @@ export const getArtistProfileData = async ({
 
   const baseMatch = {
     eventType: 'scrobble',
+    ...userScope(userId),
     track: { $in: trackMetaIds }
   };
 

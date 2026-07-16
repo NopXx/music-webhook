@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign in · Music Webhook</title>
+    <link rel="icon" href="data:,">
+    <style>
+      :root {
+        --bg: #0f172a; --panel: #1e293b; --border: #334155;
+        --text: #e2e8f0; --muted: #94a3b8; --accent: #6366f1; --accent-hover: #818cf8;
+        --red: #ef4444; --green: #22c55e;
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        margin: 0; background: var(--bg); color: var(--text);
+        min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;
+      }
+      .card {
+        width: 100%; max-width: 380px; background: var(--panel);
+        border: 1px solid var(--border); border-radius: 1rem; padding: 2rem;
+      }
+      h1 { font-size: 1.5rem; margin: 0 0 0.25rem; text-align: center; }
+      .sub { color: var(--muted); font-size: 0.9rem; text-align: center; margin: 0 0 1.5rem; }
+      .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+      .tab {
+        flex: 1; padding: 0.5rem; text-align: center; border-radius: 0.5rem; cursor: pointer;
+        background: transparent; border: 1px solid var(--border); color: var(--muted); font-weight: 600; font-size: 0.9rem;
+      }
+      .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+      label { display: block; font-size: 0.8rem; color: var(--muted); margin: 0 0 0.35rem; }
+      input {
+        width: 100%; padding: 0.7rem 0.85rem; margin-bottom: 1rem; border-radius: 0.5rem;
+        border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.95rem;
+      }
+      input:focus { outline: none; border-color: var(--accent); }
+      button.submit {
+        width: 100%; padding: 0.75rem; border: none; border-radius: 0.5rem; cursor: pointer;
+        background: var(--accent); color: #fff; font-weight: 600; font-size: 0.95rem;
+      }
+      button.submit:hover { background: var(--accent-hover); }
+      button.submit:disabled { opacity: 0.6; cursor: not-allowed; }
+      .msg { font-size: 0.85rem; margin-top: 1rem; text-align: center; min-height: 1.2em; }
+      .msg.error { color: var(--red); }
+      .msg.ok { color: var(--green); }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Music Webhook</h1>
+      <p class="sub">Sign in to your dashboard</p>
+
+      <div class="tabs">
+        <button class="tab active" data-mode="login">Log in</button>
+        <button class="tab" data-mode="register">Register</button>
+      </div>
+
+      <form id="form">
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="email" required>
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" minlength="8" required>
+        <button class="submit" type="submit" id="submit">Log in</button>
+      </form>
+
+      <div class="msg" id="msg"></div>
+    </div>
+
+    <script>
+      let mode = 'login';
+      const tabs = document.querySelectorAll('.tab');
+      const submitBtn = document.getElementById('submit');
+      const msg = document.getElementById('msg');
+      const form = document.getElementById('form');
+
+      tabs.forEach((tab) => {
+        tab.addEventListener('click', () => {
+          mode = tab.dataset.mode;
+          tabs.forEach((t) => t.classList.toggle('active', t === tab));
+          submitBtn.textContent = mode === 'login' ? 'Log in' : 'Register';
+          msg.textContent = '';
+          msg.className = 'msg';
+        });
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+        submitBtn.disabled = true;
+        msg.textContent = '';
+        msg.className = 'msg';
+
+        try {
+          const res = await fetch('/api/auth/' + mode, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            msg.textContent = data.message || 'Something went wrong';
+            msg.className = 'msg error';
+            return;
+          }
+          // Token is also set as an httpOnly cookie; keep a copy for API clients / Bearer use.
+          if (data.token) localStorage.setItem('token', data.token);
+          msg.textContent = 'Success — redirecting…';
+          msg.className = 'msg ok';
+          const params = new URLSearchParams(location.search);
+          location.href = params.get('next') || '/';
+        } catch (err) {
+          msg.textContent = 'Network error';
+          msg.className = 'msg error';
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

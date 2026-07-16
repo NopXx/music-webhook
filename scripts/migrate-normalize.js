@@ -21,6 +21,7 @@ import Artist from '../models/Artist.js';
 import Album from '../models/Album.js';
 import TrackMeta from '../models/TrackMeta.js';
 import Scrobble from '../models/Scrobble.js';
+import User from '../models/User.js';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const BATCH_SIZE = 200;
@@ -115,7 +116,27 @@ async function migrate() {
   console.log(`\n🔄 Starting migration${DRY_RUN ? ' (DRY RUN)' : ''}...`);
   console.log(`📦 Connecting to: ${MONGO_URI.replace(/\/\/.*@/, '//***@')}\n`);
 
-  await mongoose.connect(MONGO_URI);
+  // Respect DB_NAME like the app's connector — otherwise the URI has no path
+  // and mongoose falls back to the `test` database.
+  const options = process.env.DB_NAME ? { dbName: process.env.DB_NAME } : {};
+  await mongoose.connect(MONGO_URI, options);
+  console.log(`🔗 ${MONGO_URI.replace(/\/\/.*@/, '//***@')}${process.env.DB_NAME ? ` (db: ${process.env.DB_NAME})` : ''}\n`);
+
+  // Resolve the owner for migrated scrobbles (legacy data has no user).
+  let ownerId;
+  if (DRY_RUN) {
+    ownerId = new mongoose.Types.ObjectId();
+  } else {
+    const admin = (process.env.ADMIN_EMAIL && await User.findByEmail(process.env.ADMIN_EMAIL))
+      || await User.findOne({ role: 'admin' }).sort({ createdAt: 1 });
+    if (!admin) {
+      console.error('❌ No admin user found. Seed an admin (ADMIN_EMAIL/ADMIN_PASSWORD) before migrating.');
+      await mongoose.disconnect();
+      process.exit(1);
+    }
+    ownerId = admin._id;
+    console.log(`👤 Migrated scrobbles will be owned by: ${admin.email}\n`);
+  }
 
   // Access the old 'tracks' collection directly
   const db = mongoose.connection.db;
@@ -209,6 +230,7 @@ async function migrate() {
       // 4. Create Scrobble
       if (!DRY_RUN) {
         await Scrobble.create({
+          user: ownerId,
           track: trackMeta._id,
           timestamp: doc.timestamp || doc.scrobbledAt || new Date(),
           scrobbledAt: doc.scrobbledAt || doc.timestamp || new Date(),

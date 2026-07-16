@@ -20,11 +20,13 @@ class ScrobbleController {
   async handleScrobble(req, res) {
     try {
       const { validatedTrack } = req;
+      const userId = req.user?.id;
       const trackData = scrobbleService.parseScrobbleData(req.body, req, validatedTrack);
-      
+      trackData.user = userId;
+
       if (trackData.eventType === 'paused' || trackData.eventType === 'stopped') {
-        nowPlayingService.updateFromEvent(trackData);
-        const npStatus = nowPlayingService.getStatus();
+        nowPlayingService.updateFromEvent(userId, trackData);
+        const npStatus = nowPlayingService.getStatus(userId);
         return res.status(200).json({
           success: true,
           action: 'ignored',
@@ -38,18 +40,18 @@ class ScrobbleController {
       }
 
       if (trackData.eventType === 'nowplaying') {
-        nowPlayingService.setPlaying(trackData);
+        nowPlayingService.setPlaying(userId, trackData);
 
         // Background: enrich with Apple Music animated artwork (fire-and-forget)
         // Skip if track already has animationUrl; use version guard to prevent stale results
-        const trackHasArtwork = nowPlayingService.current?.track?.animationUrl;
+        const trackHasArtwork = nowPlayingService.getCurrent(userId)?.track?.animationUrl;
         if (trackData.title && trackData.artist && !trackHasArtwork) {
-          const version = nowPlayingService.getVersion();
+          const version = nowPlayingService.getVersion(userId);
           appleMusicService.fetchAnimatedArtwork(trackData.title, trackData.artist, trackData.album || '')
             .then(result => {
-              if (nowPlayingService.getVersion() !== version) return;
-              if (result.success && result.animationUrl && nowPlayingService.current?.track) {
-                nowPlayingService.attachEnrichment({
+              if (nowPlayingService.getVersion(userId) !== version) return;
+              if (result.success && result.animationUrl && nowPlayingService.getCurrent(userId)?.track) {
+                nowPlayingService.attachEnrichment(userId, {
                   animationUrl: result.animationUrl,
                   appleMusicUrl: result.appleMusicUrl,
                 });
@@ -60,7 +62,7 @@ class ScrobbleController {
             });
         }
 
-        const npStatus = nowPlayingService.getStatus();
+        const npStatus = nowPlayingService.getStatus(userId);
         return res.status(200).json({
           success: true,
           message: 'Now playing updated',
@@ -149,7 +151,7 @@ class ScrobbleController {
         });
       }
 
-      const updated = await updateLovedTrackStatus({ id, isLoved });
+      const updated = await updateLovedTrackStatus({ id, isLoved, userId: req.user?.id });
       res.status(200).json({
         success: true,
         track: updated
@@ -280,6 +282,7 @@ class ScrobbleController {
           if (!trackData) {
             throw new Error('ไม่สามารถสร้างข้อมูล track จาก entry นี้ได้');
           }
+          trackData.user = req.user?.id;
 
           const result = await Scrobble.findOrCreateScrobble(trackData);
           const action = result.action || 'created';

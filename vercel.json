@@ -8,7 +8,7 @@
     "api/index.js": {
       "memory": 1024,
       "maxDuration": 15,
-      "includeFiles": "{config,middleware,models,routes,services}/**"
+      "includeFiles": "{config,middleware,models,routes,services,views,public}/**"
     }
   },
   "routes": [
