@@ -278,31 +278,22 @@ const computeTopTracksLeaderboard = async ({
     ...(rangeMatch || {})
   };
 
+  // Group by track (present on the scrobble) BEFORE hydrating, so the 3-table
+  // join runs only on the top-N tracks instead of every scrobble in range.
   const pipeline = [
     { $match: baseMatch },
-    ...HYDRATE_PIPELINE,
     { $sort: { scrobbledAt: -1 } },
     {
       $group: {
         _id: '$track',
-        artist: { $first: '$artist' },
-        title: { $first: '$title' },
-        album: { $first: '$album' },
         plays: { $sum: 1 },
-        lastPlay: {
-          $first: {
-            scrobbledAt: '$scrobbledAt',
-            connector: '$connector',
-            source: '$source',
-            trackArtUrl: '$trackArtUrl',
-            animationUrl: '$animationUrl',
-            albumUrl: '$albumUrl'
-          }
-        }
+        lastPlay: { $first: '$scrobbledAt' }
       }
     },
     { $sort: { plays: -1 } },
-    { $limit: sanitizedLimit }
+    { $limit: sanitizedLimit },
+    { $addFields: { track: '$_id' } },
+    ...HYDRATE_PIPELINE
   ];
 
   const results = await Scrobble.aggregate(pipeline);
@@ -318,10 +309,10 @@ const computeTopTracksLeaderboard = async ({
       title: doc.title,
       album: doc.album,
       plays: doc.plays,
-      lastPlay: doc.lastPlay?.scrobbledAt,
+      lastPlay: doc.lastPlay,
       latestMedia: {
-        trackArtUrl: doc.lastPlay?.trackArtUrl || null,
-        animationUrl: doc.lastPlay?.animationUrl || null
+        trackArtUrl: doc.trackArtUrl || null,
+        animationUrl: doc.animationUrl || null
       }
     }))
   };
@@ -488,40 +479,41 @@ const computeTrackInsights = async ({
     return null;
   }
 
-  // Find related tracks by the same artist (excluding this track)
+  // Find related tracks by the same artist (excluding this track).
+  // Prefilter to this artist's track ids (indexed TrackMeta.find) and match
+  // scrobbles by track $in, instead of joining trackmetas on every scrobble
+  // then filtering by artist. The title lookup runs only on the top 5.
+  const artistTrackIds = await TrackMeta.find({ artist: artistDoc._id }).distinct('_id');
   const related = await Scrobble.aggregate([
     {
       $match: {
         eventType: 'scrobble',
-        ...userScope(userId)
-      }
-    },
-    {
-      $lookup: {
-        from: 'trackmetas',
-        localField: 'track',
-        foreignField: '_id',
-        as: 'tm'
-      }
-    },
-    { $unwind: '$tm' },
-    {
-      $match: {
-        'tm.artist': artistDoc._id,
-        track: { $ne: trackMeta._id }
+        ...userScope(userId),
+        track: { $in: artistTrackIds, $ne: trackMeta._id }
       }
     },
     {
       $group: {
         _id: '$track',
-        title: { $first: '$tm.title' },
         plays: { $sum: 1 },
         lastPlay: { $max: '$scrobbledAt' }
       }
     },
     { $sort: { plays: -1 } },
-    { $limit: 5 }
-  ]);
+    { $limit: 5 },
+    {
+      $lookup: {
+        from: 'trackmetas',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'tm'
+      }
+    },
+    { $unwind: '$tm' }
+  ]).then((rows) =>
+    // Preserve the original field order (_id, title, plays, lastPlay).
+    rows.map((r) => ({ _id: r._id, title: r.tm.title, plays: r.plays, lastPlay: r.lastPlay }))
+  );
 
   // Add recent scrobble info (with artist/title/album for response compatibility)
   const recentWithMeta = (result?.recent || []).map((r) => ({
