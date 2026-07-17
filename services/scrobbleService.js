@@ -9,6 +9,16 @@ import {
   mergeMetadata,
 } from '../utils/trackNormalizer.js';
 
+/**
+ * Read a display name off an artist/album value that may be a populated doc, a
+ * plain string (legacy flat shape), or a bare ObjectId ref. An unpopulated ref
+ * has no name, so it yields '' rather than stringifying into a fake one.
+ */
+export const refName = (value) => {
+  if (typeof value === 'string') return value;
+  return typeof value?.name === 'string' ? value.name : '';
+};
+
 class ScrobbleService {
   /**
    * Normalize and prepare string for comparison
@@ -272,11 +282,18 @@ class ScrobbleService {
   async enrichWithSpotifyData(trackOrScrobble) {
     // Resolve the TrackMeta document
     let trackMeta = trackOrScrobble._trackMeta || trackOrScrobble;
-    const artistName = trackMeta.artist?.name || trackOrScrobble.artist || '';
+    const artistName = refName(trackMeta.artist) || refName(trackOrScrobble._artist);
     const trackTitle = trackMeta.title || trackOrScrobble.title || '';
 
     try {
       if (!spotifyService.isConfigured()) return;
+
+      // Never search on a blank artist: it matches nothing and still burns the
+      // spotify_search_attempted flag, permanently excluding the track from retries.
+      if (!artistName || !trackTitle) {
+        console.warn(`⚠️ Skipping Spotify search, unresolved identity: "${artistName}" - "${trackTitle}"`);
+        return;
+      }
 
       console.log(`🎵 Searching Spotify for: ${artistName} - ${trackTitle}`);
 
@@ -405,9 +422,9 @@ class ScrobbleService {
    */
   async enrichWithAnimationData(trackOrScrobble) {
     let trackMeta = trackOrScrobble._trackMeta || trackOrScrobble;
-    const artistName = trackMeta.artist?.name || trackOrScrobble.artist || '';
+    const artistName = refName(trackMeta.artist) || refName(trackOrScrobble._artist);
     const trackTitle = trackMeta.title || trackOrScrobble.title || '';
-    const albumName = trackMeta.album?.name || trackOrScrobble.album || '';
+    const albumName = refName(trackMeta.album) || refName(trackOrScrobble._album);
 
     try {
       console.log(`🎬 Searching animated artwork for: ${artistName} - ${trackTitle}`);
