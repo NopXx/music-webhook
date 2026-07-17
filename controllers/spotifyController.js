@@ -1,6 +1,40 @@
 import spotifyService from '../services/spotifyService.js';
 import scrobbleService from '../services/scrobbleService.js';
 import TrackMeta from '../models/TrackMeta.js';
+import '../models/Artist.js'; // registers the model that populate('artist') resolves
+
+// Fields Spotify enrichment can fill in on a TrackMeta. `year` is deliberately
+// absent: it lives on the Album document, not here.
+const ENRICHABLE_FIELDS = ['duration', 'album', 'trackNumber'];
+
+/**
+ * Build the TrackMeta filter for updateMissingSpotifyData.
+ * Every field here must exist on trackMetaSchema — this query used to be written
+ * against the flat legacy Track shape, which cast-errored on the `album` ref.
+ */
+export function buildMissingDataQuery({ forceUpdate, onlyMissingBasicData, priorityFields }) {
+  if (forceUpdate) return {};
+  if (!onlyMissingBasicData) return { spotify_search_attempted: { $ne: true } };
+
+  const requested = String(priorityFields ?? '')
+    .split(',')
+    .map(field => field.trim())
+    .filter(field => ENRICHABLE_FIELDS.includes(field));
+  const targetFields = requested.length ? requested : ENRICHABLE_FIELDS;
+
+  return {
+    $and: [
+      // `{field: null}` also matches documents where the field is absent.
+      { $or: targetFields.map(field => ({ [field]: null })) },
+      {
+        $or: [
+          { spotify_search_attempted: { $ne: true } },
+          { spotify_match_found: { $ne: true } },
+        ],
+      },
+    ],
+  };
+}
 
 // Helper for concurrency control
 async function pMap(array, mapper, concurrency = 5) {
@@ -165,55 +199,17 @@ class SpotifyController {
       const limit = Math.min(parseInt(req.query.limit || '50'), 100); // Max 100 at a time
       const onlyMissingBasicData = req.query.missingOnly === 'true'; // เฉพาะที่ขาดข้อมูลพื้นฐาน
       const forceUpdate = req.query.force === 'true'; // บังคับ update ทั้งหมด
-      const priorityFields = req.query.priority || 'duration,album,year'; // fields ที่ต้องการให้ priority
-      const priorityFieldsArray = priorityFields
-        .split(',')
-        .map(field => field.trim())
-        .filter(Boolean);
-      
+      const priorityFields = req.query.priority || 'duration,album,trackNumber';
+
       console.log(`🔄 Starting Spotify data update for existing tracks...`);
 
-      // Query logic remains same...
-      let query = {};
-      if (forceUpdate) {
-        query = { eventType: 'scrobble' };
-      } else if (onlyMissingBasicData) {
-        const missingFieldConditions = [];
-        if (priorityFieldsArray.includes('duration')) missingFieldConditions.push({ duration: null }, { duration: { $exists: false } });
-        if (priorityFieldsArray.includes('album')) missingFieldConditions.push({ album: null }, { album: '' }, { album: { $exists: false } });
-        if (priorityFieldsArray.includes('year')) missingFieldConditions.push({ year: null }, { year: { $exists: false } });
-        if (priorityFieldsArray.includes('trackNumber')) missingFieldConditions.push({ trackNumber: null }, { trackNumber: { $exists: false } });
-
-        if (missingFieldConditions.length === 0) {
-          missingFieldConditions.push(
-            { duration: null }, { duration: { $exists: false } },
-            { album: null }, { album: '' }, { album: { $exists: false } },
-            { year: null }, { year: { $exists: false } }
-          );
-        }
-
-        const searchRetryConditions = {
-          $or: [
-            { spotify_search_attempted: { $ne: true } },
-            { spotify_match_found: { $ne: true } },
-          ],
-        };
-
-        query = {
-          eventType: 'scrobble',
-          $and: [{ $or: missingFieldConditions }, searchRetryConditions]
-        };
-      } else {
-        query = {
-          eventType: 'scrobble',
-          spotify_search_attempted: { $ne: true }
-        };
-      }
+      const query = buildMissingDataQuery({ forceUpdate, onlyMissingBasicData, priorityFields });
 
       const tracksToUpdate = await TrackMeta.find(query)
         .sort({ updatedAt: -1 })
         .limit(limit)
-        .select('_id title artist album duration trackNumber spotify_search_attempted spotify_enriched');
+        .select('_id title artist album duration trackNumber spotify_search_attempted spotify_enriched')
+        .populate('artist', 'name');
 
       if (tracksToUpdate.length === 0) {
         return res.status(200).json({
@@ -231,9 +227,7 @@ class SpotifyController {
         enriched: 0,
         no_match: 0,
         errors: 0,
-        fields_updated: {
-          duration: 0, album: 0, year: 0, trackNumber: 0
-        }
+        fields_updated: Object.fromEntries(ENRICHABLE_FIELDS.map(field => [field, 0]))
       };
 
       // Concurrent processing with pMap
@@ -241,25 +235,23 @@ class SpotifyController {
         try {
           // console.log(`🔍 [${i + 1}/${tracksToUpdate.length}] Processing: ${track.artist} - ${track.title}`);
           
-          const beforeUpdate = {
-            duration: track.duration,
-            album: track.album,
-            year: track.year,
-            trackNumber: track.trackNumber
-          };
-          
+          // Stringify so ObjectId fields (album) compare by value, not identity.
+          const before = Object.fromEntries(
+            ENRICHABLE_FIELDS.map(field => [field, String(track[field] ?? '')])
+          );
+
           await scrobbleService.enrichWithSpotifyData(track);
-          
+
           const updatedTrack = await TrackMeta.findById(track._id);
-          
+
           if (updatedTrack && updatedTrack.spotify_enriched) {
             stats.enriched++;
-            
-            if (beforeUpdate.duration !== updatedTrack.duration && updatedTrack.duration) stats.fields_updated.duration++;
-            if (beforeUpdate.album !== updatedTrack.album && updatedTrack.album) stats.fields_updated.album++;
-            if (beforeUpdate.year !== updatedTrack.year && updatedTrack.year) stats.fields_updated.year++;
-            if (beforeUpdate.trackNumber !== updatedTrack.trackNumber && updatedTrack.trackNumber) stats.fields_updated.trackNumber++;
-            
+
+            for (const field of ENRICHABLE_FIELDS) {
+              const after = updatedTrack[field];
+              if (after && String(after) !== before[field]) stats.fields_updated[field]++;
+            }
+
             // console.log(`✅ Successfully enriched: ${track.artist} - ${track.title}`);
           } else {
             stats.no_match++;

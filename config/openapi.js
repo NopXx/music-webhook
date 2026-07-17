@@ -627,8 +627,8 @@ const openapi = {
         parameters: [
           { name: 'limit', in: 'query', description: 'Tracks to process (max 100).', schema: { type: 'integer', default: 50 } },
           { name: 'missingOnly', in: 'query', description: 'Only tracks missing priority fields.', schema: { type: 'boolean' } },
-          { name: 'force', in: 'query', description: 'Update all scrobble tracks.', schema: { type: 'boolean' } },
-          { name: 'priority', in: 'query', description: 'Comma-separated fields to target.', schema: { type: 'string', default: 'duration,album,year' } },
+          { name: 'force', in: 'query', description: 'Update all tracks.', schema: { type: 'boolean' } },
+          { name: 'priority', in: 'query', description: 'Comma-separated fields to target. Unknown fields are ignored.', schema: { type: 'string', default: 'duration,album,trackNumber', enum: ['duration', 'album', 'trackNumber'] } },
         ],
         responses: {
           200: { description: 'Update completed' },
