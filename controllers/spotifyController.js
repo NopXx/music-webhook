@@ -205,8 +205,11 @@ class SpotifyController {
 
       const query = buildMissingDataQuery({ forceUpdate, onlyMissingBasicData, priorityFields });
 
+      // Least-recently-touched first. Enrichment bumps updatedAt, so a newest-first
+      // sort refills each batch with the tracks it just failed to match, and the
+      // never-attempted backlog behind them is never reached.
       const tracksToUpdate = await TrackMeta.find(query)
-        .sort({ updatedAt: -1 })
+        .sort({ updatedAt: 1 })
         .limit(limit)
         .select('_id title artist album duration trackNumber spotify_search_attempted spotify_enriched')
         .populate('artist', 'name');
