@@ -71,23 +71,21 @@ async function testSpotifyEnrichment() {
           year: track.year || undefined,
           trackNumber: track.trackNumber || undefined,
           connector: 'test-enrichment',
-          eventType: 'scrobble'
+          // `eventName`, not `eventType`: validation.js only reads body.eventName,
+          // and anything else normalizes to 'unknown' and gets ignored.
+          eventName: 'scrobble'
         })
       });
 
       const result = await response.json();
-      
-      if (response.ok) {
-        console.log(`   ✅ Track saved: ${result.trackId}`);
-        console.log(`   📦 Action: ${result.action}`);
-        console.log(`   🎧 Spotify configured: ${result.spotify_configured}`);
-        console.log(`   🔄 Enrichment queued: ${result.spotify_enrichment_queued}`);
-        
-        if (result.track.spotify_data) {
-          console.log(`   🎵 Already has Spotify data!`);
-        }
-      } else {
+
+      if (!response.ok) {
         console.log(`   ❌ Error: ${result.error || result.message}`);
+      } else if (result.action !== 'created') {
+        console.log(`   ⏭️  Not scrobbled — action: ${result.action} (${result.message})`);
+      } else {
+        console.log(`   ✅ Scrobble created: ${result.scrobble?._id}`);
+        console.log(`   🎵 TrackMeta: ${result.scrobble?.track}`);
       }
       
     } catch (error) {
