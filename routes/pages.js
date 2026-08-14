@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import openapiSpec from '../config/openapi.js';
 import systemController from '../controllers/systemController.js';
+import { authenticatePage } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -35,6 +36,7 @@ const SWAGGER_UI_HTML = `<!DOCTYPE html>
 
 // API documentation
 const refPath = () => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'reference.html');
+const viewPath = (name) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'views', name);
 
 router.get('/openapi.json', (req, res) => res.json(openapiSpec));
 // Last.fm-style reference portal (rendered from /openapi.json)
@@ -44,10 +46,10 @@ router.get(['/docs/swagger', '/api-docs'], (req, res) => {
   res.type('html').send(SWAGGER_UI_HTML);
 });
 
-// Root — serve the API reference portal to browsers, JSON to API clients
+// Root — serve the marketing landing page to browsers, JSON to API clients
 router.get('/', (req, res, next) => {
   if (req.accepts(['html', 'json']) === 'html') {
-    return res.sendFile(refPath(), (err) => {
+    return res.sendFile(viewPath('landing.html'), (err) => {
       if (err) systemController.handleRoot(req, res);
     });
   }
@@ -60,7 +62,17 @@ router.get('/api/health', systemController.healthCheck.bind(systemController));
 
 // Login page
 router.get('/login', (req, res) => {
-  res.sendFile(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'views', 'login.html'));
+  res.sendFile(viewPath('login.html'));
+});
+
+// Dashboard (post-login). authenticatePage redirects to /login when the cookie is missing/expired.
+router.get('/dashboard', authenticatePage, (req, res) => {
+  res.sendFile(viewPath('dashboard.html'));
+});
+
+// API key management
+router.get('/keys', authenticatePage, (req, res) => {
+  res.sendFile(viewPath('keys.html'));
 });
 
 // API info endpoint

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>API keys · Music Webhook</title>
+    <link rel="icon" href="data:,">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;460;540;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --primary: #1b1938; --primary-deep: #0e0c1f; --on-primary: #ffffff;
+        --ink: #292827; --ink-mute: #73706d; --ink-faint: #9a9794;
+        --canvas: #ffffff; --canvas-soft: #fafaf8;
+        --violet-soft: #c9b4fa; --teal-deep: #0c2c4a; --teal-mid: #1a4f7a;
+        --hairline: #e8e4dd; --hairline-dark: #3f3a52;
+        --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px; --r-full: 9999px;
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        font-weight: 460; margin: 0; background: var(--canvas); color: var(--ink);
+        min-height: 100dvh; line-height: 1.5; -webkit-font-smoothing: antialiased;
+        display: flex; flex-direction: column;
+      }
+      .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
+      .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; width: 100%; }
+
+      header { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--canvas) 88%, transparent);
+        backdrop-filter: blur(10px); border-bottom: 1px solid var(--hairline);
+        display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 16px 24px; }
+      h1 { font-size: 20px; margin: 0; font-weight: 540; letter-spacing: -0.4px; }
+      a.back { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-mute); font-size: 14px;
+        text-decoration: none; margin-top: 3px; font-weight: 540; }
+      a.back:hover { color: var(--ink); }
+      .icon { width: 18px; height: 18px; flex-shrink: 0; }
+      .icon.sm { width: 14px; height: 14px; }
+
+      .btn { display: inline-flex; align-items: center; gap: 7px; height: 42px; padding: 0 20px;
+        border-radius: var(--r-md); border: 1px solid transparent; background: var(--primary); color: var(--on-primary);
+        font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; text-decoration: none; line-height: 1;
+        transition: background .16s ease, border-color .16s ease, color .16s ease, opacity .16s ease; }
+      .btn:hover { background: var(--primary-deep); }
+      .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+      .btn.outline { background: var(--canvas); color: var(--ink); border-color: var(--hairline); font-weight: 600; }
+      .btn.outline:hover { background: var(--canvas-soft); border-color: var(--ink-faint); }
+      .btn.outline:disabled { opacity: 0.45; cursor: not-allowed; }
+      .btn.danger { background: var(--canvas); color: #b42318; border-color: color-mix(in srgb, #b42318 30%, var(--hairline)); font-weight: 600; }
+      .btn.danger:hover { background: #fdf3f2; }
+      .btn.small { height: 34px; padding: 0 14px; font-size: 14px; font-weight: 600; }
+      .btn.on-teal { background: var(--canvas); color: var(--teal-deep); }
+      .btn.on-teal:hover { background: var(--canvas-soft); }
+
+      main { padding: 40px 0 0; }
+      /* create card */
+      .create { background: var(--canvas); border: 1px solid var(--hairline); border-radius: var(--r-lg);
+        padding: 24px; margin-bottom: 12px; display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+      .create .field { flex: 1; min-width: 200px; }
+      label { display: block; font-size: 14px; color: var(--ink-mute); margin: 0 0 6px; font-weight: 540; }
+      input { width: 100%; height: 42px; padding: 0 12px; border-radius: var(--r-sm); border: 1px solid var(--hairline);
+        background: var(--canvas); color: var(--ink); font: inherit; font-size: 16px; transition: border-color .16s ease; }
+      input:focus { outline: none; border-color: var(--primary); }
+      .helper { font-size: 14px; color: var(--ink-mute); margin: 8px 2px 24px; }
+      .msg { min-height: 1.1em; font-size: 14px; margin: -6px 2px 16px; }
+      .msg.err { color: #b42318; }
+
+      /* reveal — violet-soft interlude */
+      .reveal { display: none; background: color-mix(in srgb, var(--violet-soft) 22%, var(--canvas));
+        border: 1px solid color-mix(in srgb, var(--violet-soft) 60%, var(--hairline)); border-radius: var(--r-lg); padding: 24px; margin-bottom: 24px; }
+      .reveal.show { display: block; }
+      .reveal .warn { display: flex; align-items: center; gap: 8px; color: var(--primary); font-size: 14px; font-weight: 700; margin-bottom: 16px; }
+      .reveal .keybox { display: flex; gap: 8px; align-items: center; }
+      .reveal code { flex: 1; font-size: 14px; background: var(--canvas); border: 1px solid var(--hairline); border-radius: var(--r-sm);
+        padding: 10px 12px; overflow-x: auto; white-space: nowrap; color: var(--ink); }
+
+      .list { display: flex; flex-direction: column; gap: 8px; }
+      .row { display: flex; align-items: center; gap: 14px; background: var(--canvas-soft); border: 1px solid var(--hairline);
+        border-radius: var(--r-md); padding: 14px 16px; transition: border-color .16s ease; }
+      .row:hover { border-color: var(--ink-faint); }
+      .row .kicon { width: 36px; height: 36px; border-radius: var(--r-md); display: grid; place-items: center; flex-shrink: 0;
+        background: var(--primary); color: var(--on-primary); }
+      .row .main { flex: 1; min-width: 0; }
+      .row .label { font-weight: 540; font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .row .label .unnamed { color: var(--ink-mute); font-weight: 460; font-style: italic; }
+      .row .prefix { font-size: 13px; background: var(--canvas); border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 7px; color: var(--ink-mute); }
+      .row .meta { color: var(--ink-mute); font-size: 13px; margin-top: 3px; }
+      .row .acts { display: flex; gap: 8px; flex-shrink: 0; }
+      .muted { color: var(--ink-mute); font-size: 15px; padding: 32px; text-align: center; border: 1px dashed var(--hairline); border-radius: var(--r-md); }
+      .err { color: #b42318; font-size: 15px; }
+      .skel { background: var(--canvas-soft); border: 1px solid var(--hairline); border-radius: var(--r-md); height: 64px; position: relative; overflow: hidden; }
+      .skel::after { content:""; position:absolute; inset:0; transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, rgba(0,0,0,0.04), transparent); animation: sh 1.3s infinite; }
+      @keyframes sh { 100% { transform: translateX(100%); } }
+
+      .teal { margin-top: auto; background: var(--teal-deep); color: var(--on-primary);
+        background-image: radial-gradient(700px 240px at 15% -60%, var(--teal-mid), transparent); }
+      .teal .inner { max-width: 760px; margin: 0 auto; padding: 64px 24px; }
+      .teal h3 { font-size: 28px; font-weight: 540; letter-spacing: -0.63px; line-height: 1.14; margin: 0 0 8px; }
+      .teal p { color: color-mix(in srgb, var(--on-primary) 70%, transparent); margin: 0 0 24px; font-size: 16px; }
+      .teal code { color: var(--violet-soft); }
+
+      @media (prefers-reduced-motion: reduce) { * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>API keys</h1>
+        <a class="back" href="/dashboard">
+          <svg class="icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Back to dashboard
+        </a>
+      </div>
+      <button class="btn outline" id="logout">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>
+        Log out
+      </button>
+    </header>
+
+    <div class="wrap">
+      <main>
+        <form class="create" id="createForm">
+          <div class="field">
+            <label for="label">Label (optional)</label>
+            <input id="label" type="text" placeholder="e.g. my laptop scrobbler" maxlength="100" autocomplete="off">
+          </div>
+          <button class="btn" id="create" type="submit">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            Create key
+          </button>
+        </form>
+        <p class="helper">Keys authenticate scrobbler clients via the <span class="mono">x-api-key</span> header. The full key is shown only once at creation.</p>
+        <div class="msg err" id="createMsg" role="alert" aria-live="polite"></div>
+
+        <div class="reveal" id="reveal">
+          <div class="warn">
+            <svg class="icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+            Copy these now — the key will never be shown again.
+          </div>
+          <label>API key</label>
+          <div class="keybox">
+            <code class="mono" id="rawkey"></code>
+            <button class="btn small outline copybtn" type="button" data-copy="rawkey">Copy</button>
+          </div>
+          <label style="margin-top:16px">Webhook URL <span class="mono" style="color:var(--ink-faint)">(key embedded — paste into Web Scrobbler)</span></label>
+          <div class="keybox">
+            <code class="mono" id="webhookUrl"></code>
+            <button class="btn small outline copybtn" type="button" data-copy="webhookUrl">Copy</button>
+          </div>
+        </div>
+
+        <div class="list" id="list"></div>
+      </main>
+    </div>
+
+    <div class="teal">
+      <div class="inner">
+        <h3>One key, every scrobbler.</h3>
+        <p>Send listens via the <code class="mono">x-api-key</code> header, or paste the embedded webhook URL straight into Web Scrobbler.</p>
+        <a class="btn on-teal" href="/dashboard">Back to dashboard</a>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const KEY_SVG = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 21 2m-4 4 3 3m-6-1 3 3"/></svg>';
+
+      const req = (path, opts = {}) => fetch(path, { credentials: 'same-origin', ...opts }).then(async (r) => {
+        if (r.status === 401) { location.href = '/login?next=/keys'; throw new Error('unauth'); }
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.message || 'HTTP ' + r.status);
+        return data;
+      });
+      const fmtDate = (iso) => iso ? new Date(iso).toLocaleString() : '—';
+
+      // Full keys are only returned at creation, so we can only build a copyable
+      // webhook URL for keys made in this session. Old keys get a disabled button.
+      const sessionKeys = new Map();
+      const webhookUrlFor = (raw) => `${location.origin}/webhook/scrobble?api_key=${encodeURIComponent(raw)}`;
+
+      async function loadKeys() {
+        $('list').innerHTML = '<div class="skel"></div><div class="skel"></div>';
+        try {
+          const { apiKeys } = await req('/api/auth/api-keys');
+          $('list').innerHTML = (apiKeys && apiKeys.length)
+            ? apiKeys.map((k) => {
+                const id = k.id || k._id;
+                const raw = sessionKeys.get(id);
+                const copyBtn = raw
+                  ? `<button class="btn small outline copyurl" data-id="${esc(id)}">Copy URL</button>`
+                  : `<button class="btn small outline" disabled title="The webhook URL is only available right after the key is created">Copy URL</button>`;
+                return `
+                <div class="row" data-id="${esc(id)}">
+                  <div class="kicon" aria-hidden="true">${KEY_SVG}</div>
+                  <div class="main">
+                    <div class="label">${k.label ? esc(k.label) : '<span class="unnamed">Unnamed key</span>'} <span class="prefix mono">${esc(k.prefix)}…</span></div>
+                    <div class="meta">Created ${esc(fmtDate(k.createdAt))} · Last used ${esc(fmtDate(k.lastUsedAt))}</div>
+                  </div>
+                  <div class="acts">
+                    ${copyBtn}
+                    <button class="btn danger small revoke">Revoke</button>
+                  </div>
+                </div>`;
+              }).join('')
+            : '<div class="muted">No API keys yet. Create one above for your scrobbler client.</div>';
+        } catch (e) {
+          $('list').innerHTML = `<div class="err">Failed to load keys: ${esc(e.message)}</div>`;
+        }
+      }
+
+      $('createForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = $('create'); btn.disabled = true; $('createMsg').textContent = '';
+        try {
+          const label = $('label').value.trim();
+          const data = await req('/api/auth/api-keys', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }),
+          });
+          if (data.apiKey && data.apiKey.id) sessionKeys.set(data.apiKey.id, data.key);
+          $('rawkey').textContent = data.key;
+          $('webhookUrl').textContent = webhookUrlFor(data.key);
+          $('reveal').classList.add('show');
+          $('reveal').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          $('label').value = '';
+          await loadKeys();
+        } catch (err) {
+          $('createMsg').textContent = err.message;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      // Generic copy: any .copybtn copies the text of the element named in data-copy
+      document.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.copybtn');
+        if (!btn) return;
+        const text = $(btn.dataset.copy)?.textContent || '';
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          const prev = btn.textContent; btn.textContent = 'Copied';
+          setTimeout(() => { btn.textContent = prev; }, 1500);
+        } catch {}
+      });
+
+      $('list').addEventListener('click', async (e) => {
+        const copyUrl = e.target.closest('.copyurl');
+        if (copyUrl) {
+          const raw = sessionKeys.get(copyUrl.dataset.id);
+          if (!raw) return;
+          try {
+            await navigator.clipboard.writeText(webhookUrlFor(raw));
+            copyUrl.textContent = 'Copied'; setTimeout(() => { copyUrl.textContent = 'Copy URL'; }, 1500);
+          } catch {}
+          return;
+        }
+        const btn = e.target.closest('.revoke');
+        if (!btn) return;
+        const row = btn.closest('.row');
+        if (!confirm('Revoke this key? Clients using it will stop working.')) return;
+        btn.disabled = true; btn.textContent = 'Revoking…';
+        try {
+          await req('/api/auth/api-keys/' + encodeURIComponent(row.dataset.id), { method: 'DELETE' });
+          await loadKeys();
+        } catch (err) {
+          btn.disabled = false; btn.textContent = 'Revoke';
+          alert('Failed to revoke: ' + err.message);
+        }
+      });
+
+      $('logout').addEventListener('click', async () => {
+        try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
+        localStorage.removeItem('token');
+        location.href = '/login';
+      });
+
+      loadKeys();
+    </script>
+  </body>
+</html>
