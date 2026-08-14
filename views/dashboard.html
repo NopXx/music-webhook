@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard · Music Webhook</title>
+    <link rel="icon" href="data:,">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;460;540;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --primary: #1b1938; --primary-deep: #0e0c1f; --on-primary: #ffffff;
+        --ink: #292827; --ink-mute: #73706d; --ink-faint: #9a9794;
+        --canvas: #ffffff; --canvas-soft: #fafaf8;
+        --violet-soft: #c9b4fa; --teal-deep: #0c2c4a; --teal-mid: #1a4f7a;
+        --hairline: #e8e4dd; --hairline-dark: #3f3a52;
+        --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px; --r-full: 9999px;
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body {
+        font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        font-weight: 460; margin: 0; background: var(--canvas); color: var(--ink);
+        min-height: 100dvh; line-height: 1.5; letter-spacing: 0;
+        -webkit-font-smoothing: antialiased;
+        display: flex; flex-direction: column;
+      }
+      .num { font-variant-numeric: tabular-nums; }
+      .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px 0; width: 100%; }
+
+      /* nav-bar-light */
+      header { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--canvas) 88%, transparent);
+        backdrop-filter: blur(10px); border-bottom: 1px solid var(--hairline);
+        display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 16px 24px; }
+      .nav-inner { max-width: 1080px; }
+      .brand { display: flex; align-items: center; gap: 12px; }
+      .brand .logo { width: 36px; height: 36px; border-radius: var(--r-md); display: grid; place-items: center;
+        background: var(--primary); color: var(--on-primary); flex-shrink: 0; }
+      h1 { font-size: 20px; margin: 0; font-weight: 540; letter-spacing: -0.4px; }
+      .who { color: var(--ink-mute); font-size: 14px; margin-top: 1px; font-weight: 460; }
+      .controls { display: flex; gap: 8px; align-items: center; }
+      .btn { display: inline-flex; align-items: center; gap: 7px; height: 42px; padding: 0 20px;
+        border-radius: var(--r-md); border: 1px solid transparent; background: var(--primary); color: var(--on-primary);
+        font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; text-decoration: none; line-height: 1;
+        transition: background .16s ease, border-color .16s ease, color .16s ease; }
+      .btn:hover { background: var(--primary-deep); }
+      .btn:active { background: var(--primary-deep); }
+      .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+      .btn.outline { background: var(--canvas); color: var(--ink); border-color: var(--hairline); font-weight: 600; }
+      .btn.outline:hover { background: var(--canvas-soft); border-color: var(--ink-faint); }
+      .btn.link { background: transparent; color: var(--ink); border: none; font-weight: 600; padding: 0 8px; height: auto; }
+      .btn.link:hover { background: transparent; text-decoration: underline; }
+      select.btn { -webkit-appearance: none; appearance: none; padding-right: 34px; background: var(--canvas); color: var(--ink);
+        border-color: var(--hairline); font-weight: 600; font-size: 14px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2373706d' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-position: right 12px center; }
+      select.btn:hover { border-color: var(--ink-faint); }
+      .icon { width: 18px; height: 18px; flex-shrink: 0; }
+
+      main { padding: 40px 0 0; }
+      /* Now playing — indigo interlude */
+      .np { display: none; align-items: center; gap: 16px; padding: 16px 20px; margin-bottom: 32px;
+        background: var(--primary); color: var(--on-primary); border-radius: var(--r-lg);
+        background-image: radial-gradient(600px 200px at 90% -40%, color-mix(in srgb, var(--violet-soft) 40%, transparent), transparent); }
+      .np.show { display: flex; }
+      .np img { width: 60px; height: 60px; border-radius: var(--r-md); object-fit: cover; background: var(--primary-deep); flex-shrink: 0; }
+      .np .body { min-width: 0; flex: 1; }
+      .np .tag { display: inline-flex; align-items: center; gap: 7px; background: var(--violet-soft); color: var(--primary);
+        font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: var(--r-full); }
+      .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 10px; }
+      .eq span { width: 3px; background: var(--primary); border-radius: 2px; animation: eq 0.9s ease-in-out infinite; }
+      .eq span:nth-child(2){ animation-delay:.2s } .eq span:nth-child(3){ animation-delay:.4s } .eq span:nth-child(4){ animation-delay:.15s }
+      @keyframes eq { 0%,100%{ height:3px } 50%{ height:10px } }
+      .np .t { font-weight: 540; font-size: 18px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .np .a { color: var(--violet-soft); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+      /* stat cards */
+      .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 40px; }
+      @media (max-width: 720px){ .cards { grid-template-columns: repeat(2, 1fr); } }
+      .card { background: var(--canvas); border: 1px solid var(--hairline); border-radius: var(--r-lg); padding: 24px; }
+      .card.featured { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+      .card .ct { display: flex; align-items: center; gap: 8px; color: var(--ink-mute); font-size: 14px; font-weight: 540; }
+      .card.featured .ct { color: var(--violet-soft); }
+      .card .ct .icon { width: 15px; height: 15px; }
+      .card .n { font-size: 34px; font-weight: 540; margin-top: 12px; letter-spacing: -1px; line-height: 1; }
+
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+      @media (max-width: 760px){ .grid { grid-template-columns: 1fr; } }
+      section h2 { font-size: 14px; margin: 0 0 16px; color: var(--ink-mute); font-weight: 600; letter-spacing: 0; }
+      .list { display: flex; flex-direction: column; gap: 8px; }
+      .row { display: flex; align-items: center; gap: 14px; background: var(--canvas-soft); border: 1px solid var(--hairline);
+        border-radius: var(--r-md); padding: 12px 16px; transition: border-color .16s ease, background .16s ease; }
+      .row:hover { border-color: var(--ink-faint); }
+      .rank { width: 22px; text-align: center; color: var(--ink-faint); font-weight: 700; flex-shrink: 0; }
+      .row .main { min-width: 0; flex: 1; }
+      .row .title { font-weight: 540; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .row .meta { color: var(--ink-mute); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .row .side { color: var(--ink-mute); font-size: 14px; flex-shrink: 0; text-align: right; font-weight: 540; }
+      .art { width: 44px; height: 44px; border-radius: var(--r-sm); object-fit: cover; background: var(--canvas-soft); flex-shrink: 0; border: 1px solid var(--hairline); }
+      .bar { height: 4px; border-radius: 3px; margin-top: 7px; background: color-mix(in srgb, var(--primary) 14%, transparent); overflow: hidden; }
+      .bar > i { display: block; height: 100%; background: var(--primary); border-radius: 3px; }
+
+      .muted { color: var(--ink-mute); font-size: 15px; padding: 8px 2px; }
+      .err { color: #b42318; font-size: 15px; }
+      .skel { background: var(--canvas-soft); border: 1px solid var(--hairline); border-radius: var(--r-md); height: 62px; position: relative; overflow: hidden; }
+      .skel::after { content:""; position:absolute; inset:0; transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, rgba(0,0,0,0.04), transparent); animation: sh 1.3s infinite; }
+      @keyframes sh { 100% { transform: translateX(100%); } }
+
+      /* closing teal band */
+      .teal { margin-top: auto; background: var(--teal-deep); color: var(--on-primary);
+        background-image: radial-gradient(700px 240px at 15% -60%, var(--teal-mid), transparent); }
+      .teal .inner { max-width: 1080px; margin: 0 auto; padding: 64px 24px; display: flex; align-items: center;
+        justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+      .teal h3 { font-size: 28px; font-weight: 540; letter-spacing: -0.63px; line-height: 1.14; margin: 0; max-width: 30ch; }
+      .teal p { color: color-mix(in srgb, var(--on-primary) 70%, transparent); margin: 8px 0 0; font-size: 16px; }
+      .btn.on-teal { background: var(--canvas); color: var(--teal-deep); }
+      .btn.on-teal:hover { background: var(--canvas-soft); }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        </div>
+        <div>
+          <h1>Music Dashboard</h1>
+          <div class="who" id="who">Loading…</div>
+        </div>
+      </div>
+      <div class="controls">
+        <a class="btn link" href="/keys">API keys</a>
+        <select class="btn" id="range" aria-label="Time range">
+          <option value="day">Today</option>
+          <option value="week">This week</option>
+          <option value="month" selected>This month</option>
+          <option value="year">This year</option>
+          <option value="all-time">All time</option>
+        </select>
+        <button class="btn outline" id="logout">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>
+          Log out
+        </button>
+      </div>
+    </header>
+
+    <div class="wrap">
+      <main>
+        <div class="np" id="np">
+          <img id="np-art" alt="Now playing artwork">
+          <div class="body">
+            <span class="tag"><span class="eq" aria-hidden="true"><span></span><span></span><span></span><span></span></span> Now playing</span>
+            <div class="t" id="np-title"></div>
+            <div class="a" id="np-artist"></div>
+          </div>
+        </div>
+
+        <div class="cards" id="cards"></div>
+
+        <div class="grid">
+          <section aria-labelledby="h-artists">
+            <h2 id="h-artists">Top artists</h2>
+            <div class="list" id="artists"></div>
+          </section>
+          <section aria-labelledby="h-recent">
+            <h2 id="h-recent">Recent scrobbles</h2>
+            <div class="list" id="recent"></div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div class="teal">
+      <div class="inner">
+        <div>
+          <h3>Every listen, captured.</h3>
+          <p>Point your scrobbler at a webhook key and your history keeps itself.</p>
+        </div>
+        <a class="btn on-teal" href="/keys">Manage API keys</a>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44'%3E%3Crect width='44' height='44' fill='%23fafaf8'/%3E%3Cpath d='M18 14v10a3 3 0 1 1-2-2.8V13l10-2v8a3 3 0 1 1-2-2.8V10z' fill='%239a9794'/%3E%3C/svg%3E";
+      const skeleton = (n) => Array.from({ length: n }, () => '<div class="skel"></div>').join('');
+
+      const api = (path) => fetch(path, { credentials: 'same-origin' }).then((r) => {
+        if (r.status === 401) { location.href = '/login?next=/dashboard'; throw new Error('unauth'); }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+
+      const fmtDuration = (sec) => {
+        if (!sec) return '0m';
+        const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+        return h ? `${h}h ${m}m` : `${m}m`;
+      };
+      const fmtTime = (iso) => {
+        if (!iso) return '';
+        const d = new Date(iso), diff = (Date.now() - d.getTime()) / 1000;
+        if (diff < 60) return 'just now';
+        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+        if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+        return d.toLocaleDateString();
+      };
+      const ICONS = {
+        plays: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+        track: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>',
+        artist: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/>',
+        time: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+      };
+      const svg = (p) => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+
+      async function loadUser() {
+        try {
+          const { user } = await api('/api/auth/me');
+          $('who').textContent = user ? `${user.email} · ${user.role}` : '';
+        } catch { /* redirect handled in api() */ }
+      }
+
+      async function loadNowPlaying() {
+        try {
+          const np = await api('/api/nowplaying');
+          if (np && np.playing && np.track) {
+            $('np-title').textContent = np.track.title || '';
+            $('np-artist').textContent = np.track.artist || '';
+            $('np-art').src = np.track.animationUrl || np.track.trackArtUrl || PLACEHOLDER;
+            $('np').classList.add('show');
+          } else {
+            $('np').classList.remove('show');
+          }
+        } catch { /* non-fatal */ }
+      }
+
+      async function loadStats(range) {
+        $('cards').innerHTML = Array.from({ length: 4 }, () => '<div class="skel" style="height:96px"></div>').join('');
+        $('artists').innerHTML = skeleton(5);
+        $('recent').innerHTML = skeleton(6);
+        try {
+          const s = await api('/api/stats?range=' + encodeURIComponent(range) + '&recentLimit=15&topArtistLimit=10');
+          const t = s.totals || {};
+          $('cards').innerHTML = [
+            ['plays', 'Plays', (t.totalPlays || 0).toLocaleString(), true],
+            ['track', 'Unique tracks', (t.uniqueTracks || 0).toLocaleString(), false],
+            ['artist', 'Artists', (t.uniqueArtists || 0).toLocaleString(), false],
+            ['time', 'Listening time', fmtDuration(t.totalDurationSeconds || 0), false],
+          ].map(([ic, l, n, feat]) => `<div class="card${feat ? ' featured' : ''}"><div class="ct">${svg(ICONS[ic])}${esc(l)}</div><div class="n num">${esc(n)}</div></div>`).join('');
+
+          const artists = s.topArtists || [];
+          const max = Math.max(1, ...artists.map((a) => a.plays || 0));
+          $('artists').innerHTML = artists.length
+            ? artists.map((a, i) => `<div class="row"><div class="rank num">${i + 1}</div><div class="main"><div class="title">${esc(a.artist)}</div><div class="bar"><i style="width:${Math.round(((a.plays || 0) / max) * 100)}%"></i></div></div><div class="side num">${(a.plays || 0).toLocaleString()}</div></div>`).join('')
+            : '<div class="muted">No plays in this range.</div>';
+
+          const recent = s.recentScrobbles || [];
+          $('recent').innerHTML = recent.length
+            ? recent.map((r) => `<div class="row"><img class="art" loading="lazy" src="${esc(r.trackArtUrl || PLACEHOLDER)}" onerror="this.src='${PLACEHOLDER}'" alt=""><div class="main"><div class="title">${esc(r.title)}</div><div class="meta">${esc(r.artist)}${r.album ? ' · ' + esc(r.album) : ''}</div></div><div class="side num">${esc(fmtTime(r.scrobbledAt))}</div></div>`).join('')
+            : '<div class="muted">No scrobbles in this range.</div>';
+        } catch (e) {
+          $('cards').innerHTML = `<div class="err">Failed to load stats: ${esc(e.message)}</div>`;
+          $('artists').innerHTML = $('recent').innerHTML = '';
+        }
+      }
+
+      $('range').addEventListener('change', (e) => loadStats(e.target.value));
+      $('logout').addEventListener('click', async () => {
+        try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
+        localStorage.removeItem('token');
+        location.href = '/login';
+      });
+
+      loadUser();
+      loadNowPlaying();
+      loadStats($('range').value);
+      setInterval(loadNowPlaying, 20000); // ponytail: dumb 20s poll; swap for SSE if it ever matters
+    </script>
+  </body>
+</html>
