@@ -16,9 +16,9 @@ COPY . .
 # Expose port
 EXPOSE 3001
 
-# Health check
+# Health check — use bun's fetch (no curl in the image) against the in-container port 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3001/api/health || exit 1
+  CMD bun -e "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # Start the application
 CMD ["bun", "run", "start"]
