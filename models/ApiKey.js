@@ -6,6 +6,11 @@ const apiKeySchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  // AES-GCM ciphertext of the raw key, so the owner can retrieve it (and its
+  // webhook URL) after the create step. Absent on keys made before this existed.
+  keyEnc: {
+    type: String,
+  },
   // First 8 chars of the raw key, shown in listings so users can identify a key
   prefix: {
     type: String,
@@ -36,6 +41,7 @@ const apiKeySchema = new mongoose.Schema({
     virtuals: true,
     transform(_doc, ret) {
       delete ret.keyHash;
+      delete ret.keyEnc;
       return ret;
     },
   },

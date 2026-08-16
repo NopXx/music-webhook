@@ -187,10 +187,13 @@
           $('list').innerHTML = (apiKeys && apiKeys.length)
             ? apiKeys.map((k) => {
                 const id = k.id || k._id;
-                const raw = sessionKeys.get(id);
+                // Prefer the server-returned key (recoverable anytime); fall back to the
+                // in-session key for freshly created rows.
+                if (k.key) sessionKeys.set(id, k.key);
+                const raw = k.key || sessionKeys.get(id);
                 const copyBtn = raw
                   ? `<button class="btn small outline copyurl" data-id="${esc(id)}">Copy URL</button>`
-                  : `<button class="btn small outline" disabled title="The webhook URL is only available right after the key is created">Copy URL</button>`;
+                  : `<button class="btn small outline" disabled title="This key predates URL recovery — create a new key to copy its webhook URL">Copy URL</button>`;
                 return `
                 <div class="row" data-id="${esc(id)}">
                   <div class="kicon" aria-hidden="true">${KEY_SVG}</div>

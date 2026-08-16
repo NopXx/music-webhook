@@ -1,6 +1,7 @@
 import authService from '../services/authService.js';
 import User from '../models/User.js';
 import ApiKey from '../models/ApiKey.js';
+import { encryptKey, decryptKey } from '../utils/keyCipher.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7d
@@ -111,6 +112,7 @@ class AuthController {
 
       const doc = await ApiKey.create({
         keyHash: hash,
+        keyEnc: encryptKey(raw),
         prefix,
         label: typeof label === 'string' ? label.trim() : '',
         owner: req.user.id,
@@ -131,7 +133,11 @@ class AuthController {
   async listApiKeys(req, res) {
     try {
       const keys = await ApiKey.find({ owner: req.user.id, revoked: false }).sort({ createdAt: -1 });
-      return res.status(200).json({ apiKeys: keys });
+      // Attach the decrypted raw key so the owner can copy the webhook URL anytime.
+      // Only keys created after keyEnc was introduced can be recovered; older ones
+      // return key: null and stay copy-at-creation-only.
+      const apiKeys = keys.map((k) => ({ ...k.toJSON(), key: decryptKey(k.keyEnc) }));
+      return res.status(200).json({ apiKeys });
     } catch (error) {
       return res.status(500).json({ error: 'Failed to list API keys', message: error.message });
     }
