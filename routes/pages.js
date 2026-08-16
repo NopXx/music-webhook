@@ -39,8 +39,13 @@ const refPath = () => path.join(path.dirname(fileURLToPath(import.meta.url)), '.
 const viewPath = (name) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'views', name);
 
 router.get('/openapi.json', (req, res) => res.json(openapiSpec));
-// Last.fm-style reference portal (rendered from /openapi.json)
-router.get(['/docs', '/reference'], (req, res) => res.sendFile(refPath()));
+// Last.fm-style reference portal (rendered from /openapi.json).
+// Fall back to the Swagger UI if the static file is missing, so /docs never 500s.
+router.get(['/docs', '/reference'], (req, res) => {
+  res.sendFile(refPath(), (err) => {
+    if (err && !res.headersSent) res.type('html').send(SWAGGER_UI_HTML);
+  });
+});
 // Swagger UI for interactive try-it-out
 router.get(['/docs/swagger', '/api-docs'], (req, res) => {
   res.type('html').send(SWAGGER_UI_HTML);

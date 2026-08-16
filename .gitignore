@@ -85,7 +85,10 @@ dist
 
 # Gatsby files
 .cache/
-public
+public/*
+# ...but keep the static pages the server actually serves (e.g. /docs)
+!public/reference.html
+!public/index.html
 
 # Storybook build outputs
 .out

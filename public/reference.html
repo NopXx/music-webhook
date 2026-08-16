@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Music Webhook · API Reference</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      --bg: #0b1120; --panel: #111c30; --panel2: #16223a; --border: #243049;
+      --text: #e2e8f0; --muted: #94a3b8; --accent: #6366f1; --accent-hover: #818cf8;
+      --green: #22c55e; --amber: #f59e0b; --cyan: #22d3ee; --pink: #f472b6;
+      --sidebar-w: 280px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; }
+    a { color: var(--accent-hover); text-decoration: none; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    /* Layout */
+    .wrap { display: flex; min-height: 100vh; }
+    aside {
+      width: var(--sidebar-w); flex: 0 0 var(--sidebar-w); position: sticky; top: 0; height: 100vh;
+      overflow-y: auto; border-right: 1px solid var(--border); background: #0a0f1c; padding: 1.25rem 0;
+    }
+    main { flex: 1; min-width: 0; padding: 2rem 2.5rem 6rem; max-width: 920px; }
+
+    .brand { padding: 0 1.25rem 1rem; display: flex; align-items: center; gap: 0.6rem; }
+    .brand .logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg,var(--accent),var(--pink)); }
+    .brand b { font-size: 1.05rem; }
+    .navgroup { margin-top: 0.75rem; }
+    .navgroup .gtitle { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+      padding: 0.4rem 1.25rem; font-weight: 700; }
+    .navgroup a { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 1.25rem; color: var(--text);
+      font-size: 0.86rem; opacity: 0.85; border-left: 2px solid transparent; }
+    .navgroup a:hover { opacity: 1; background: var(--panel); border-left-color: var(--accent); }
+    .m { font-size: 0.6rem; font-weight: 700; padding: 0.05rem 0.32rem; border-radius: 0.25rem; letter-spacing: 0.03em; }
+    .m.get { background: rgba(34,211,238,0.15); color: var(--cyan); }
+    .m.post { background: rgba(34,197,94,0.15); color: var(--green); }
+    .m.patch { background: rgba(245,158,11,0.15); color: var(--amber); }
+    .m.delete { background: rgba(244,114,182,0.15); color: var(--pink); }
+
+    /* Hero */
+    .hero { border-bottom: 1px solid var(--border); padding-bottom: 1.75rem; margin-bottom: 2rem; }
+    .hero h1 { font-size: 2rem; margin: 0 0 0.5rem; }
+    .hero p { color: var(--muted); margin: 0 0 1rem; max-width: 640px; }
+    .actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+    .btn { padding: 0.55rem 1.1rem; border-radius: 0.55rem; font-weight: 600; font-size: 0.88rem;
+      border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { background: var(--accent-hover); }
+
+    .callouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; margin: 1.5rem 0 2.5rem; }
+    .callout { background: var(--panel); border: 1px solid var(--border); border-radius: 0.7rem; padding: 1rem 1.15rem; }
+    .callout .t { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+    .callout.bearer .t { color: var(--accent-hover); }
+    .callout.key .t { color: var(--amber); }
+    .callout.query .t { color: var(--amber); }
+    .callout h3 { margin: 0.3rem 0 0.3rem; font-size: 0.98rem; }
+    .callout p { margin: 0; color: var(--muted); font-size: 0.85rem; }
+
+    /* Sections */
+    section.group { margin-bottom: 2.5rem; }
+    section.group > h2 { font-size: 1.35rem; margin: 0 0 0.3rem; padding-top: 0.5rem; }
+    section.group > .gdesc { color: var(--muted); font-size: 0.9rem; margin: 0 0 1rem; }
+
+    .ep { border: 1px solid var(--border); border-radius: 0.7rem; margin-bottom: 0.9rem; overflow: hidden; background: var(--panel); scroll-margin-top: 1rem; }
+    .ep > summary { list-style: none; cursor: pointer; padding: 0.85rem 1.1rem; display: flex; align-items: center; gap: 0.7rem; }
+    .ep > summary::-webkit-details-marker { display: none; }
+    .ep .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92rem; }
+    .ep .sum { color: var(--muted); font-size: 0.85rem; margin-left: auto; text-align: right; }
+    .badge { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.64rem; font-weight: 700; padding: 0.1rem 0.45rem; border-radius: 0.3rem; white-space: nowrap; }
+    .badge svg { width: 0.85em; height: 0.85em; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .badge.public { background: rgba(148,163,184,0.18); color: var(--muted); }
+    .badge.bearer { background: rgba(99,102,241,0.2); color: var(--accent-hover); }
+    .badge.key { background: rgba(245,158,11,0.18); color: var(--amber); }
+    .badge.query { background: rgba(245,158,11,0.12); color: var(--amber); }
+    .ep .body { padding: 0 1.1rem 1.1rem; border-top: 1px solid var(--border); }
+    .ep .desc { color: var(--muted); font-size: 0.88rem; margin: 0.9rem 0; }
+    h4 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 1rem 0 0.5rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    td code { background: rgba(148,163,184,0.13); padding: 0.08rem 0.35rem; border-radius: 0.25rem; font-size: 0.82em; }
+    .req { color: var(--pink); font-size: 0.7rem; font-weight: 700; }
+    .example { display: flex; gap: 0.55rem; align-items: center; background: var(--bg); border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.55rem 0.7rem; overflow-x: auto; }
+    .example code { font-size: 0.82rem; white-space: nowrap; color: var(--text); }
+    .resp { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.25rem 0; font-size: 0.85rem; }
+    .rc { font-family: ui-monospace, monospace; font-weight: 700; min-width: 2.5rem; }
+    .rc.ok { color: var(--green); } .rc.err { color: var(--pink); }
+    .loading { color: var(--muted); padding: 3rem; text-align: center; }
+    @media (max-width: 820px) {
+      aside { display: none; }
+      main { padding: 1.5rem 1.25rem 4rem; }
+      .callouts { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <aside id="sidebar">
+      <div class="brand"><div class="logo"></div><b>Music Webhook</b></div>
+      <div id="nav"></div>
+    </aside>
+    <main>
+      <div class="hero">
+        <h1>API Reference</h1>
+        <p id="intro">Loading…</p>
+        <div class="actions">
+          <a class="btn primary" id="dashboard-link" href="#">Open Dashboard</a>
+          <a class="btn" href="/docs/swagger">Swagger (try it out)</a>
+          <a class="btn" href="/openapi.json">openapi.json</a>
+        </div>
+      </div>
+
+      <div class="callouts">
+        <div class="callout bearer">
+          <div class="t">JWT · Bearer</div>
+          <h3>Users &amp; dashboard</h3>
+          <p>Register/login at <code>/api/auth/*</code>, then send <code>Authorization: Bearer &lt;token&gt;</code>. Reads are scoped to your own data; admin role for writes/maintenance.</p>
+        </div>
+        <div class="callout key">
+          <div class="t">API key · x-api-key</div>
+          <h3>Scrobbler clients</h3>
+          <p>Create a key at <code>POST /api/auth/api-keys</code> and send it via <code>x-api-key</code> on <code>/webhook/*</code>. Scrobbles are owned by the key's user automatically.</p>
+        </div>
+        <div class="callout query">
+          <div class="t">API key · ?api_key=</div>
+          <h3>Header-less clients</h3>
+          <p>For clients that only let you set a URL (e.g. Web Scrobbler), append the key as a query param: <code>/webhook/scrobble?api_key=&lt;key&gt;</code>. Note: keys in URLs can appear in access logs — prefer the header when possible.</p>
+        </div>
+      </div>
+
+      <div id="content"><div class="loading">Loading API reference…</div></div>
+    </main>
+  </div>
+
+  <script>
+    // Dashboard URL — override by setting window.DASHBOARD_URL or ?dashboard=
+    const params = new URLSearchParams(location.search);
+    const DASHBOARD_URL = params.get('dashboard') || window.DASHBOARD_URL || 'http://localhost:5173';
+    document.getElementById('dashboard-link').href = DASHBOARD_URL;
+
+    const METHOD_ORDER = ['get', 'post', 'patch', 'put', 'delete'];
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+    const slug = (m, p) => (m + '-' + p).replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+
+    // Inline stroke icons for security badges (color inherits via currentColor)
+    const ICON = {
+      key: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>',
+      lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+      link: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+    };
+
+    function securityBadge(op, spec) {
+      const sec = op.security ?? spec.security ?? [];
+      if (Array.isArray(sec) && sec.length === 0 && 'security' in op) {
+        return '<span class="badge public">public</span>';
+      }
+      const schemes = new Set();
+      (sec.length ? sec : (spec.security || [])).forEach((s) => Object.keys(s).forEach((k) => schemes.add(k)));
+      const out = [];
+      if (schemes.has('ApiKeyAuth')) out.push('<span class="badge key">' + ICON.key + 'API key</span>');
+      if (schemes.has('ApiKeyQueryAuth')) out.push('<span class="badge query">' + ICON.link + 'API key (URL)</span>');
+      if (schemes.has('BearerAuth')) out.push('<span class="badge bearer">' + ICON.lock + 'Bearer</span>');
+      return out.length ? out.join(' ') : '<span class="badge public">public</span>';
+    }
+
+    function paramsTable(op) {
+      const params = op.parameters || [];
+      let rows = params.map((p) => `<tr>
+        <td><code>${esc(p.name)}</code> ${p.required ? '<span class="req">required</span>' : ''}</td>
+        <td>${esc(p.in)}</td>
+        <td>${esc(p.schema?.type || '')}${p.schema?.enum ? ' · ' + p.schema.enum.map(esc).join(' | ') : ''}</td>
+        <td>${esc(p.description || '')}</td>
+      </tr>`).join('');
+
+      // requestBody → flatten top-level object properties
+      const rb = op.requestBody?.content?.['application/json']?.schema;
+      const props = rb?.properties || (rb?.oneOf || []).find((s) => s.properties)?.properties;
+      if (props) {
+        const required = new Set(rb.required || []);
+        rows += Object.entries(props).map(([name, s]) => `<tr>
+          <td><code>${esc(name)}</code> ${required.has(name) ? '<span class="req">required</span>' : ''}</td>
+          <td>body</td>
+          <td>${esc(s.type || (s.$ref ? 'object' : ''))}${s.enum ? ' · ' + s.enum.map(esc).join(' | ') : ''}</td>
+          <td>${esc(s.description || '')}</td>
+        </tr>`).join('');
+      }
+      if (!rows) return '';
+      return `<h4>Parameters</h4><table><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Description</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    function responsesList(op) {
+      const r = op.responses || {};
+      const items = Object.entries(r).map(([code, v]) => {
+        const cls = code.startsWith('2') || code === '304' ? 'ok' : 'err';
+        return `<div class="resp"><span class="rc ${cls}">${esc(code)}</span><span>${esc(v.description || '')}</span></div>`;
+      }).join('');
+      return items ? `<h4>Responses</h4>${items}` : '';
+    }
+
+    // Pick an illustrative value for a parameter (explicit example → enum → default → type/name hint)
+    function exampleValue(p) {
+      const s = p.schema || {};
+      if (p.example != null) return p.example;
+      if (s.example != null) return s.example;
+      if (Array.isArray(s.enum) && s.enum.length) return s.enum[0];
+      if (s.default != null) return s.default;
+      const n = (p.name || '').toLowerCase();
+      if (n === 'id' || n.endsWith('id')) return '65f0a1b2c3d4e5f6a7b8c9d0';
+      if (n.includes('artist') || n === 'name') return 'Radiohead';
+      if (n.includes('album')) return 'OK Computer';
+      if (n.includes('title') || n.includes('track')) return 'Karma Police';
+      if (n.includes('limit')) return 10;
+      if (n.includes('page')) return 1;
+      if (s.type === 'integer' || s.type === 'number') return 1;
+      if (s.type === 'boolean') return true;
+      return 'value';
+    }
+
+    function exampleUrl(method, path, op, spec) {
+      const params = op.parameters || [];
+      let p = path;
+      params.filter((x) => x.in === 'path').forEach((x) => {
+        const v = encodeURIComponent(exampleValue(x));
+        p = p.split('{' + x.name + '}').join(v).split(':' + x.name).join(v);
+      });
+
+      const qs = [];
+      // Query API key first, when the endpoint accepts it (header-less clients)
+      const sec = op.security ?? spec.security ?? [];
+      const schemes = new Set();
+      (Array.isArray(sec) ? sec : []).forEach((s) => Object.keys(s).forEach((k) => schemes.add(k)));
+      if (schemes.has('ApiKeyQueryAuth')) qs.push('api_key=YOUR_API_KEY');
+
+      params.filter((x) => x.in === 'query' && (x.required || x.example != null || x.schema?.example != null))
+        .forEach((x) => qs.push(encodeURIComponent(x.name) + '=' + encodeURIComponent(exampleValue(x))));
+
+      const url = location.origin + p + (qs.length ? '?' + qs.join('&') : '');
+      return `<h4>Example URL</h4><div class="example"><span class="m ${method}">${method.toUpperCase()}</span><code>${esc(url)}</code></div>`;
+    }
+
+    function render(spec) {
+      document.getElementById('intro').innerHTML =
+        (esc(spec.info?.description || '').split('\n')[0]) +
+        ` <br><small style="color:var(--muted)">Base URL: <code>${esc((spec.servers?.[0]?.url) || '/')}</code> · v${esc(spec.info?.version || '')}</small>`;
+
+      // Group operations by tag
+      const tagOrder = (spec.tags || []).map((t) => t.name);
+      const tagDesc = Object.fromEntries((spec.tags || []).map((t) => [t.name, t.description]));
+      const groups = {}; // tag -> [{method, path, op}]
+      for (const [path, item] of Object.entries(spec.paths)) {
+        for (const method of METHOD_ORDER) {
+          if (!item[method]) continue;
+          const op = item[method];
+          const tag = (op.tags && op.tags[0]) || 'Other';
+          (groups[tag] ||= []).push({ method, path, op });
+        }
+      }
+      const orderedTags = [...tagOrder.filter((t) => groups[t]), ...Object.keys(groups).filter((t) => !tagOrder.includes(t))];
+
+      // Sidebar
+      document.getElementById('nav').innerHTML = orderedTags.map((tag) => `
+        <div class="navgroup">
+          <div class="gtitle">${esc(tag)}</div>
+          ${groups[tag].map(({ method, path, op }) => `
+            <a href="#${slug(method, path)}"><span class="m ${method}">${method.toUpperCase()}</span> <span>${esc(op.summary || path)}</span></a>
+          `).join('')}
+        </div>`).join('');
+
+      // Content
+      document.getElementById('content').innerHTML = orderedTags.map((tag) => `
+        <section class="group">
+          <h2>${esc(tag)}</h2>
+          ${tagDesc[tag] ? `<p class="gdesc">${esc(tagDesc[tag])}</p>` : ''}
+          ${groups[tag].map(({ method, path, op }) => `
+            <details class="ep" id="${slug(method, path)}">
+              <summary>
+                <span class="m ${method}">${method.toUpperCase()}</span>
+                <span class="path">${esc(path)}</span>
+                ${securityBadge(op, spec)}
+                <span class="sum">${esc(op.summary || '')}</span>
+              </summary>
+              <div class="body">
+                ${op.description ? `<p class="desc">${esc(op.description)}</p>` : ''}
+                ${exampleUrl(method, path, op, spec)}
+                ${paramsTable(op)}
+                ${responsesList(op)}
+              </div>
+            </details>
+          `).join('')}
+        </section>`).join('');
+
+      // Open the targeted endpoint if navigated via hash
+      if (location.hash) {
+        const el = document.querySelector(location.hash);
+        if (el) { el.open = true; el.scrollIntoView(); }
+      }
+    }
+
+    fetch('/openapi.json')
+      .then((r) => r.json())
+      .then(render)
+      .catch((err) => {
+        document.getElementById('content').innerHTML =
+          `<div class="loading">Failed to load /openapi.json — ${esc(err.message)}</div>`;
+      });
+
+    // Open endpoint when a sidebar link is clicked
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest('a[href^="#"]');
+      if (!a) return;
+      const el = document.querySelector(a.getAttribute('href'));
+      if (el) el.open = true;
+    });
+  </script>
+</body>
+</html>
