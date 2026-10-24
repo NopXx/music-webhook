@@ -68,6 +68,8 @@ Scrobble path: validation middleware (`middleware/validation.js`) detects payloa
 
 Required: `MONGODB_URI`. Optional but behavior-changing: `REDIS_URL` (enables cache layer), `SPOTIFY_CLIENT_ID`/`SECRET`, `LASTFM_API_KEY`, `SPOTIFY_FETCH_AUDIO_FEATURES` (costs extra API quota — keep off unless needed), `SCROBBLE_DEDUPE` (`off`/`window`), `DEBUG_WEBHOOKS`/`DEBUG_VALIDATION`, `ALLOWED_ORIGINS`, `NODE_ENV` (`production` changes logging + disables debug middleware). Multiple `.env.*` files exist for different targets (`.env.docker`, `.env.production`, `.env.local`); `.env.example` documents the full set.
 
+`.dockerignore` keeps every `.env*` (except `.env.example`) out of the image, so in Docker the env comes from the compose service at runtime (`env_file:` on the prod `webhook` service). `dotenv` finds no file in the container and leaves `process.env` as is. Changing an env value needs only `docker compose up -d webhook` (recreate), not a rebuild.
+
 ## Migration
 
 Legacy `tracks` → normalized (`artists` + `albums` + `trackmetas` + `scrobbles`):
