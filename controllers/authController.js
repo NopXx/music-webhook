@@ -20,9 +20,20 @@ const cookieOptions = () => ({
 
 class AuthController {
 
+  // Closed by default. An authenticated admin can always create users (any
+  // role, no session switch); anonymous self-signup as viewer only when
+  // ALLOW_REGISTRATION=true.
   async register(req, res) {
     try {
-      const { email, password } = req.body || {};
+      const { email, password, role } = req.body || {};
+      const byAdmin = req.user?.role === 'admin';
+
+      if (!byAdmin && !authService.isRegistrationOpen()) {
+        return res.status(403).json({ error: 'Forbidden', message: 'Registration is disabled' });
+      }
+      if (role !== undefined && (!byAdmin || !['admin', 'viewer'].includes(role))) {
+        return res.status(400).json({ error: 'Invalid role', message: 'role may only be set by an admin (admin|viewer)' });
+      }
 
       if (!email || !EMAIL_RE.test(email)) {
         return res.status(400).json({ error: 'Invalid email', message: 'A valid email is required' });
@@ -40,8 +51,16 @@ class AuthController {
       const user = await User.create({
         email: email.trim().toLowerCase(),
         passwordHash,
-        role: 'viewer',
+        role: byAdmin && role ? role : 'viewer',
       });
+
+      if (byAdmin) {
+        // Don't hand out a token or replace the admin's own session cookie.
+        return res.status(201).json({
+          success: true,
+          user: { id: user._id, email: user.email, role: user.role },
+        });
+      }
 
       const token = authService.signToken(user);
       res.cookie('token', token, cookieOptions());
