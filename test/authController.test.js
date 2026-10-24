@@ -6,6 +6,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-for-authcontroll
 
 import authController from '../controllers/authController.js';
 import authRouter from '../routes/auth.js';
+import { TRUST_PROXY } from '../config/proxy.js';
 import authService from '../services/authService.js';
 import User from '../models/User.js';
 
@@ -22,18 +23,25 @@ const statusOf = (res) => res.status.mock.calls[0][0];
 
 describe('authController.register', () => {
   const original = process.env.ALLOW_REGISTRATION;
+  const originalSecret = process.env.TURNSTILE_SECRET_KEY;
   let create;
+  let findByEmail;
+  let verify;
 
   beforeEach(() => {
     delete process.env.ALLOW_REGISTRATION;
-    spyOn(User, 'findByEmail').mockResolvedValue(null);
+    process.env.TURNSTILE_SECRET_KEY = 'test-turnstile-secret';
+    findByEmail = spyOn(User, 'findByEmail').mockResolvedValue(null);
     create = spyOn(User, 'create').mockImplementation(async (doc) => ({ _id: 'new-id', ...doc }));
+    verify = spyOn(authService, 'verifyTurnstile').mockResolvedValue(true);
   });
 
   afterEach(() => {
     mock.restore();
     if (original === undefined) delete process.env.ALLOW_REGISTRATION;
     else process.env.ALLOW_REGISTRATION = original;
+    if (originalSecret === undefined) delete process.env.TURNSTILE_SECRET_KEY;
+    else process.env.TURNSTILE_SECRET_KEY = originalSecret;
   });
 
   it('rejects anonymous signup by default (403) and creates nothing', async () => {
@@ -54,11 +62,15 @@ describe('authController.register', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('allows anonymous viewer signup when ALLOW_REGISTRATION=true', async () => {
+  it('allows anonymous viewer signup when ALLOW_REGISTRATION=true and Turnstile passes', async () => {
     process.env.ALLOW_REGISTRATION = 'true';
     const res = makeRes();
-    await authController.register({ body: { email: 'A@B.co', password: 'longenough' } }, res);
+    await authController.register({
+      body: { email: 'A@B.co', password: 'longenough', turnstileToken: 'tok' },
+      ip: '203.0.113.5',
+    }, res);
     expect(statusOf(res)).toBe(201);
+    expect(verify).toHaveBeenCalledWith('tok', '203.0.113.5');
     expect(create.mock.calls[0][0].role).toBe('viewer');
     expect(typeof body(res).token).toBe('string');
     expect(res.cookie).toHaveBeenCalled();
@@ -67,9 +79,60 @@ describe('authController.register', () => {
   it('does not let an anonymous signup pick its role', async () => {
     process.env.ALLOW_REGISTRATION = 'true';
     const res = makeRes();
-    await authController.register({ body: { email: 'a@b.co', password: 'longenough', role: 'admin' } }, res);
+    await authController.register({ body: { email: 'a@b.co', password: 'longenough', role: 'admin', turnstileToken: 'tok' } }, res);
     expect(statusOf(res)).toBe(400);
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('refuses anonymous signup (503) when TURNSTILE_SECRET_KEY is unset', async () => {
+    process.env.ALLOW_REGISTRATION = 'true';
+    delete process.env.TURNSTILE_SECRET_KEY;
+    const res = makeRes();
+    await authController.register({ body: { email: 'a@b.co', password: 'longenough', turnstileToken: 'tok' } }, res);
+    expect(statusOf(res)).toBe(503);
+    expect(body(res).message).toContain('TURNSTILE_SECRET_KEY');
+    expect(verify).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('requires a turnstileToken for anonymous signup (400)', async () => {
+    process.env.ALLOW_REGISTRATION = 'true';
+    const res = makeRes();
+    await authController.register({ body: { email: 'a@b.co', password: 'longenough' } }, res);
+    expect(statusOf(res)).toBe(400);
+    expect(verify).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid Turnstile token (400) before looking up the email', async () => {
+    process.env.ALLOW_REGISTRATION = 'true';
+    verify.mockResolvedValue(false);
+    const res = makeRes();
+    await authController.register({ body: { email: 'a@b.co', password: 'longenough', turnstileToken: 'bad' } }, res);
+    expect(statusOf(res)).toBe(400);
+    expect(findByEmail).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 when Cloudflare siteverify cannot be reached', async () => {
+    process.env.ALLOW_REGISTRATION = 'true';
+    verify.mockRejectedValue(new Error('network down'));
+    const res = makeRes();
+    await authController.register({ body: { email: 'a@b.co', password: 'longenough', turnstileToken: 'tok' } }, res);
+    expect(statusOf(res)).toBe(503);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('lets an admin create users without Turnstile, even with no secret configured', async () => {
+    process.env.ALLOW_REGISTRATION = 'true';
+    delete process.env.TURNSTILE_SECRET_KEY;
+    const res = makeRes();
+    await authController.register({
+      body: { email: 'friend@b.co', password: 'longenough' },
+      user: { id: 'adm', role: 'admin' },
+    }, res);
+    expect(statusOf(res)).toBe(201);
+    expect(verify).not.toHaveBeenCalled();
   });
 
   it('lets an admin create a user while registration is closed, without a token or cookie', async () => {
@@ -112,7 +175,7 @@ describe('auth routes (HTTP)', () => {
     spyOn(User, 'findByEmail').mockResolvedValue(null);
     spyOn(User, 'create').mockImplementation(async (doc) => ({ _id: 'new-id', ...doc }));
     const app = express();
-    app.set('trust proxy', 1); // same as index.js, so X-Forwarded-For picks the client
+    app.set('trust proxy', TRUST_PROXY); // same as index.js, so X-Forwarded-For picks the client
     app.use(express.json());
     app.use(cookieParser());
     app.use(authRouter);
@@ -156,5 +219,64 @@ describe('auth routes (HTTP)', () => {
     }
     expect(statuses.slice(0, 3)).toEqual([401, 401, 401]);
     expect(statuses[3]).toBe(429);
+  });
+
+  it('keys the limiter on the first untrusted hop, ignoring a spoofed X-Forwarded-For prefix', async () => {
+    // A public client can prepend anything; the hop appended by a trusted proxy
+    // (here 203.0.113.9) is what counts, so all four share one bucket.
+    const statuses = [];
+    for (let i = 0; i < 4; i++) {
+      const res = await post('/api/auth/login', { email: 'nobody@y.co', password: 'wrong-password' }, {
+        'X-Forwarded-For': `198.51.100.${i}, 203.0.113.9`,
+      });
+      statuses.push(res.status);
+    }
+    expect(statuses).toEqual([401, 401, 401, 429]);
+  });
+
+  it('gives different forwarded clients separate buckets', async () => {
+    for (let i = 0; i < 3; i++) {
+      await post('/api/auth/login', { email: 'nobody@y.co', password: 'wrong-password' }, {
+        'X-Forwarded-For': '203.0.113.21',
+      });
+    }
+    const other = await post('/api/auth/login', { email: 'nobody@y.co', password: 'wrong-password' }, {
+      'X-Forwarded-For': '203.0.113.22',
+    });
+    expect(other.status).toBe(401);
+  });
+
+  it('rejects anonymous signup without a turnstileToken over HTTP', async () => {
+    process.env.ALLOW_REGISTRATION = 'true';
+    process.env.TURNSTILE_SECRET_KEY = 'test-turnstile-secret';
+    try {
+      const res = await post('/api/auth/register', { email: 'x@y.co', password: 'longenough' }, {
+        'X-Forwarded-For': '203.0.113.31',
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      delete process.env.ALLOW_REGISTRATION;
+      delete process.env.TURNSTILE_SECRET_KEY;
+    }
+  });
+});
+
+describe('trust proxy setting', () => {
+  const trusts = (() => {
+    const app = express();
+    app.set('trust proxy', TRUST_PROXY);
+    return app.get('trust proxy fn');
+  })();
+
+  it('trusts loopback and the private Docker ranges', () => {
+    for (const addr of ['127.0.0.1', '::1', '172.18.0.1', '10.0.0.5', '192.168.1.2', '::ffff:172.18.0.1']) {
+      expect(trusts(addr, 0)).toBe(true);
+    }
+  });
+
+  it('does not trust public addresses', () => {
+    for (const addr of ['203.0.113.7', '1.1.1.1', '2606:4700::1111']) {
+      expect(trusts(addr, 0)).toBe(false);
+    }
   });
 });

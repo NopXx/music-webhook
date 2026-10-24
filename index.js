@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import Database from './config/database.js';
 import redis from './config/redis.js';
+import { TRUST_PROXY } from './config/proxy.js';
 import nowPlayingService from './services/nowPlayingService.js';
 import authService from './services/authService.js';
 import pagesRouter from './routes/pages.js';
@@ -98,8 +99,8 @@ class MusicWebhookServer {
     const logFormat = process.env.NODE_ENV === 'production' ? 'combined' : 'dev';
     this.app.use(morgan(logFormat));
 
-    // Trust proxy for correct IP addresses
-    this.app.set('trust proxy', 1);
+    // Trust only local/private proxies for the client IP (see config/proxy.js)
+    this.app.set('trust proxy', TRUST_PROXY);
   }
 
   setupRoutes() {

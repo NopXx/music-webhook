@@ -22,14 +22,21 @@ class AuthController {
 
   // Closed by default. An authenticated admin can always create users (any
   // role, no session switch); anonymous self-signup as viewer only when
-  // ALLOW_REGISTRATION=true.
+  // ALLOW_REGISTRATION=true, and then only with a valid Turnstile token.
   async register(req, res) {
     try {
-      const { email, password, role } = req.body || {};
+      const { email, password, role, turnstileToken } = req.body || {};
       const byAdmin = req.user?.role === 'admin';
 
       if (!byAdmin && !authService.isRegistrationOpen()) {
         return res.status(403).json({ error: 'Forbidden', message: 'Registration is disabled' });
+      }
+      if (!byAdmin && !authService.isTurnstileConfigured()) {
+        // Fail closed: open signup without bot protection is never what we want.
+        return res.status(503).json({ error: 'Unavailable', message: 'Registration is not configured (TURNSTILE_SECRET_KEY missing)' });
+      }
+      if (!byAdmin && (!turnstileToken || typeof turnstileToken !== 'string')) {
+        return res.status(400).json({ error: 'Captcha required', message: 'turnstileToken is required' });
       }
       if (role !== undefined && (!byAdmin || !['admin', 'viewer'].includes(role))) {
         return res.status(400).json({ error: 'Invalid role', message: 'role may only be set by an admin (admin|viewer)' });
@@ -40,6 +47,21 @@ class AuthController {
       }
       if (!password || typeof password !== 'string' || password.length < 8) {
         return res.status(400).json({ error: 'Invalid password', message: 'Password must be at least 8 characters' });
+      }
+
+      // Verify the captcha before touching the DB, so bots can't probe which
+      // emails are registered.
+      if (!byAdmin) {
+        let human;
+        try {
+          human = await authService.verifyTurnstile(turnstileToken, req.ip);
+        } catch (error) {
+          console.error('❌ Turnstile verify error:', error.message);
+          return res.status(503).json({ error: 'Unavailable', message: 'Could not verify captcha, try again' });
+        }
+        if (!human) {
+          return res.status(400).json({ error: 'Captcha failed', message: 'Turnstile verification failed' });
+        }
       }
 
       const existing = await User.findByEmail(email);

@@ -229,8 +229,9 @@ const openapi = {
         summary: 'Create a user (admin only, unless ALLOW_REGISTRATION=true)',
         description:
           'Closed by default. With an admin bearer token: creates a user (role admin|viewer, default viewer) ' +
-          'and returns it without a token. Anonymous: only when ALLOW_REGISTRATION=true, creates a viewer and ' +
-          'returns a JWT + token cookie. Failed attempts are rate-limited per IP.',
+          'and returns it without a token. Anonymous: only when ALLOW_REGISTRATION=true and with a valid ' +
+          'Cloudflare Turnstile token; creates a viewer and returns a JWT + token cookie. ' +
+          'Failed attempts are rate-limited per IP.',
         security: [{}, { BearerAuth: [] }],
         requestBody: {
           required: true,
@@ -243,6 +244,7 @@ const openapi = {
                   email: { type: 'string', format: 'email' },
                   password: { type: 'string', minLength: 8 },
                   role: { type: 'string', enum: ['admin', 'viewer'], description: 'Admin callers only' },
+                  turnstileToken: { type: 'string', description: 'Required for anonymous signup (Cloudflare Turnstile response)' },
                 },
               },
             },
@@ -250,10 +252,11 @@ const openapi = {
         },
         responses: {
           201: { description: 'Created — anonymous: JWT + token cookie; admin: user only' },
-          400: { description: 'Invalid email/password/role' },
+          400: { description: 'Invalid email/password/role, or missing/failed Turnstile token' },
           403: { description: 'Registration is disabled' },
           409: { description: 'Email already registered' },
           429: { description: 'Too many failed attempts' },
+          503: { description: 'Anonymous signup unavailable (TURNSTILE_SECRET_KEY unset or Cloudflare unreachable)' },
         },
       },
     },
