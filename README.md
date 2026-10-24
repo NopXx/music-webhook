@@ -222,6 +222,7 @@ Webhook Request
 | Method | Endpoint | คำอธิบาย |
 |--------|----------|-----------|
 | GET    | `/api/nowplaying` | ดูสถานะ Now Playing (รองรับ ETag / 304 Not Modified) |
+| GET    | `/api/nowplaying/internal?userId=<id>` | Now Playing ของผู้ใช้ที่ระบุ สำหรับ server-to-server เท่านั้น — ต้องส่ง header `X-Internal-Token` ให้ตรงกับ `INTERNAL_TOKEN` (ไม่ตั้ง = 404) response และ ETag เหมือน `/api/nowplaying` |
 | POST   | `/api/nowplaying/playing` | ตั้ง/อัปเดตสถานะ Now Playing พร้อม Apple Music enrichment |
 
 ### Analytics & Data
@@ -301,13 +302,17 @@ Webhook Request
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
 | `ALLOW_REGISTRATION` | เปิดให้สมัครสมาชิกเองผ่าน `POST /api/auth/register` (ได้ role `viewer`) — ต้องเป็น `true` เท่านั้นถึงจะเปิด | `false` |
 | `AUTH_RATE_LIMIT_MAX` | จำนวนครั้งที่ login/register **ล้มเหลว** ได้ต่อ IP ใน 15 นาที ก่อนโดน 429 | `10` |
+| `TURNSTILE_SECRET_KEY` | Secret ของ Cloudflare Turnstile ใช้ตรวจ `turnstileToken` ตอนสมัครเอง ถ้าเปิด `ALLOW_REGISTRATION` แต่ไม่ได้ตั้งค่านี้ การสมัครเองจะถูกปฏิเสธ (`503`) | — |
+| `INTERNAL_TOKEN` | Shared secret สำหรับ route ภายใน (`GET /api/nowplaying/internal`) ส่งมาใน header `X-Internal-Token` ไม่ตั้ง = route ตอบ `404` | — |
 
 ### การสมัครสมาชิกและ Login
 
 - การสมัครสมาชิกแบบสาธารณะ **ปิดไว้เป็นค่าเริ่มต้น** — `POST /api/auth/register` จะตอบ `403` ถ้าไม่ได้ตั้ง `ALLOW_REGISTRATION=true`
+- เมื่อเปิดแล้ว การสมัครเอง (ไม่มี admin token) ต้องส่ง `turnstileToken` ใน body ด้วย server จะตรวจกับ Cloudflare Turnstile (`siteverify`) พร้อม IP ของ client: ไม่ส่งหรือ token ไม่ผ่าน = `400`, ตรวจกับ Cloudflare ไม่ได้ = `503`, ไม่ได้ตั้ง `TURNSTILE_SECRET_KEY` = `503`
 - Admin สร้างผู้ใช้ได้เสมอ: เรียก `POST /api/auth/register` พร้อม `Authorization: Bearer <admin token>` และ body `{ "email", "password", "role"? }` (`role` เป็น `viewer` หรือ `admin`, default `viewer`) — จะไม่ออก token หรือเปลี่ยน cookie ของ admin
 - Admin คนแรกสร้างอัตโนมัติตอน boot จาก `ADMIN_EMAIL` / `ADMIN_PASSWORD` (ไม่ขึ้นกับ `ALLOW_REGISTRATION`)
 - `/api/auth/login` และ `/api/auth/register` มี rate limit นับเฉพาะครั้งที่ล้มเหลว (`AUTH_RATE_LIMIT_MAX`) แยกตาม IP — ถ้ามี server อื่น proxy การ login มา ควรส่ง `X-Forwarded-For` ของ client จริงด้วย ไม่งั้นผู้ใช้ทุกคนจะนับรวมเป็น IP เดียว
+- `trust proxy` เชื่อเฉพาะ hop ที่มาจาก loopback และ private network (`loopback, uniquelocal` ใน `config/proxy.js`) — Cloudflare tunnel บน host (ผ่าน `127.0.0.1:3001` → docker-proxy) และ service อื่นใน Docker network ส่ง `X-Forwarded-For` มาได้ แต่ client สาธารณะปลอม header นี้ไม่ได้
 - การรับ scrobble ด้วย API key (`x-api-key` / `?api_key=`) ไม่ได้รับผลกระทบ
 
 ## Migration จาก Schema เก่า

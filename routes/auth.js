@@ -7,8 +7,9 @@ import { validateContentType, asyncHandler } from '../middleware/validation.js';
 const router = express.Router();
 
 // Brute-force guard for credential endpoints. Only failed attempts count, so
-// normal logins never hit it. Keyed by req.ip (trust proxy is on), so a server
-// proxying logins should forward the client's X-Forwarded-For.
+// normal logins never hit it. Keyed by req.ip; trust proxy accepts
+// X-Forwarded-For only from loopback/private hops (config/proxy.js), so a
+// server proxying logins over the Docker network should forward the client's IP.
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   // Read per request: dotenv loads after this module is imported.

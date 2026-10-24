@@ -69,6 +69,50 @@ describe('authService.isRegistrationOpen', () => {
   });
 });
 
+describe('authService.verifyTurnstile', () => {
+  const original = process.env.TURNSTILE_SECRET_KEY;
+  afterEach(() => {
+    mock.restore();
+    if (original === undefined) delete process.env.TURNSTILE_SECRET_KEY;
+    else process.env.TURNSTILE_SECRET_KEY = original;
+  });
+
+  const reply = (data, status = 200) => new Response(JSON.stringify(data), { status });
+
+  it('posts secret, response and remoteip to siteverify', async () => {
+    process.env.TURNSTILE_SECRET_KEY = 'sekret';
+    const fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(reply({ success: true }));
+    expect(await authService.verifyTurnstile('tok', '203.0.113.5')).toBe(true);
+
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe('https://challenges.cloudflare.com/turnstile/v0/siteverify');
+    expect(init.method).toBe('POST');
+    const form = new URLSearchParams(init.body);
+    expect(form.get('secret')).toBe('sekret');
+    expect(form.get('response')).toBe('tok');
+    expect(form.get('remoteip')).toBe('203.0.113.5');
+  });
+
+  it('returns false when Cloudflare says the token is invalid', async () => {
+    process.env.TURNSTILE_SECRET_KEY = 'sekret';
+    spyOn(globalThis, 'fetch').mockResolvedValue(reply({ success: false, 'error-codes': ['invalid-input-response'] }));
+    expect(await authService.verifyTurnstile('bad', '203.0.113.5')).toBe(false);
+  });
+
+  it('throws when siteverify itself fails', async () => {
+    process.env.TURNSTILE_SECRET_KEY = 'sekret';
+    spyOn(globalThis, 'fetch').mockResolvedValue(reply({}, 500));
+    await expect(authService.verifyTurnstile('tok')).rejects.toThrow();
+  });
+
+  it('reports whether a secret is configured', () => {
+    delete process.env.TURNSTILE_SECRET_KEY;
+    expect(authService.isTurnstileConfigured()).toBe(false);
+    process.env.TURNSTILE_SECRET_KEY = 'sekret';
+    expect(authService.isTurnstileConfigured()).toBe(true);
+  });
+});
+
 describe('authService.seedAdmin', () => {
   const env = { email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD, reg: process.env.ALLOW_REGISTRATION };
   afterEach(() => {

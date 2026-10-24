@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import authService from '../services/authService.js';
 import ApiKey from '../models/ApiKey.js';
 import User from '../models/User.js';
@@ -164,10 +165,38 @@ export const authenticateClient = async (req, res, next) => {
   });
 };
 
+/**
+ * Server-to-server auth for internal routes (e.g. Liner Notes over the Docker
+ * network): X-Internal-Token must equal INTERNAL_TOKEN. With INTERNAL_TOKEN
+ * unset the route doesn't exist (404).
+ */
+export const authenticateInternal = (req, res, next) => {
+  const expected = process.env.INTERNAL_TOKEN;
+  if (!expected) {
+    return res.status(404).json({
+      error: 'Not found',
+      message: `Endpoint ${req.method} ${req.path} not found`,
+    });
+  }
+
+  // Hash both sides so timingSafeEqual gets equal-length buffers and the
+  // comparison doesn't leak the token's length.
+  const digest = (v) => crypto.createHash('sha256').update(String(v)).digest();
+  const given = req.headers['x-internal-token'];
+  if (!given || !crypto.timingSafeEqual(digest(given), digest(expected))) {
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Valid X-Internal-Token required',
+    });
+  }
+  next();
+};
+
 export default {
   authenticate,
   optionalAuthenticate,
   authenticatePage,
   requireRole,
   authenticateClient,
+  authenticateInternal,
 };

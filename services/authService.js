@@ -5,6 +5,8 @@ import User from '../models/User.js';
 
 const SALT_ROUNDS = 10;
 const DEFAULT_EXPIRES_IN = '7d';
+const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+const TURNSTILE_TIMEOUT_MS = 5000;
 
 class AuthService {
   get jwtSecret() {
@@ -64,6 +66,35 @@ class AuthService {
    */
   isRegistrationOpen() {
     return String(process.env.ALLOW_REGISTRATION || '').trim().toLowerCase() === 'true';
+  }
+
+  // ── Turnstile (anonymous signup) ─────────────
+  isTurnstileConfigured() {
+    return Boolean(process.env.TURNSTILE_SECRET_KEY);
+  }
+
+  /**
+   * Verify a Cloudflare Turnstile token with siteverify.
+   * Resolves true/false for a valid/invalid token; throws if Cloudflare can't be
+   * reached, so the caller can tell "bad token" apart from "can't check".
+   */
+  async verifyTurnstile(token, remoteip) {
+    const form = new URLSearchParams({
+      secret: process.env.TURNSTILE_SECRET_KEY,
+      response: token,
+    });
+    if (remoteip) form.set('remoteip', remoteip);
+
+    const res = await fetch(TURNSTILE_VERIFY_URL, {
+      method: 'POST',
+      body: form,
+      signal: AbortSignal.timeout(TURNSTILE_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      throw new Error(`Turnstile siteverify returned HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return data.success === true;
   }
 
   // ── Admin seeding ────────────────────────────

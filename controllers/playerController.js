@@ -8,7 +8,26 @@ class PlayerController {
    * Optimized with ETag / 304 Not Modified support
    */
   getNowPlaying(req, res) {
-    const status = nowPlayingService.getStatus(req.user.id);
+    this._sendStatus(req, res, req.user.id);
+  }
+
+  /**
+   * Internal: now-playing for any user by ?userId= (X-Internal-Token auth).
+   * Same response shape and ETag behavior as getNowPlaying.
+   */
+  getNowPlayingInternal(req, res) {
+    const { userId } = req.query;
+    if (!userId || typeof userId !== 'string') {
+      return res.status(400).json({
+        error: 'Invalid userId',
+        message: 'userId query parameter is required'
+      });
+    }
+    this._sendStatus(req, res, userId);
+  }
+
+  _sendStatus(req, res, userId) {
+    const status = nowPlayingService.getStatus(userId);
 
     // Generate ETag from lastUpdate timestamp (changes when state changes)
     const etag = `"np-${status.updatedAt ? new Date(status.updatedAt).getTime() : 0}"`;
