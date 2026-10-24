@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -16,10 +21,12 @@ jobs:
         with:
           host: ${{ vars.HOST }}
           username: ${{ vars.USERNAME }}
-          key: ${{ vars.SSH_KEY }}
+          # Private key must be a secret (masked in logs), never a repo variable.
+          key: ${{ secrets.SSH_KEY }}
 
+          # Run scripts/deploy.sh as it is on origin/main: fetch, hard-reset,
+          # rebuild the webhook container, wait for its healthcheck.
           script: |
-            cd ~/apps/music-webhook
-            git pull
-            cd ~/apps
-            docker compose up -d --build webhook
+            set -e
+            git -C ~/apps/music-webhook fetch -q origin main
+            git -C ~/apps/music-webhook show origin/main:scripts/deploy.sh | bash
