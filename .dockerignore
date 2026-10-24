@@ -1,0 +1,20 @@
+# Secrets stay out of the image: compose passes them at runtime (env_file).
+.env*
+!.env.example
+
+# Installed inside the image by `bun install`
+node_modules
+
+# Not needed at runtime
+.git
+.github
+.vscode
+.idea
+test
+docs
+logs
+*.log
+*.md
+docker-compose*.yml
+Dockerfile
+.dockerignore
