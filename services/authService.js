@@ -57,6 +57,15 @@ class AuthService {
     return { raw, hash, prefix };
   }
 
+  // ── Registration policy ──────────────────────
+  /**
+   * Public self-registration is closed unless ALLOW_REGISTRATION=true.
+   * Admins can always create users (see authController.register).
+   */
+  isRegistrationOpen() {
+    return String(process.env.ALLOW_REGISTRATION || '').trim().toLowerCase() === 'true';
+  }
+
   // ── Admin seeding ────────────────────────────
   /**
    * Create the seed admin from ADMIN_EMAIL / ADMIN_PASSWORD if it doesn't exist.

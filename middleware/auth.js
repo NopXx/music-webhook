@@ -46,6 +46,15 @@ export const authenticate = (req, res, next) => {
 };
 
 /**
+ * Set req.user if a valid JWT is present, but never reject. The handler decides.
+ */
+export const optionalAuthenticate = (req, res, next) => {
+  const user = userFromToken(req);
+  if (user) req.user = user;
+  next();
+};
+
+/**
  * Like authenticate, but redirects to /login on failure (for HTML pages).
  */
 export const authenticatePage = (req, res, next) => {
@@ -157,6 +166,7 @@ export const authenticateClient = async (req, res, next) => {
 
 export default {
   authenticate,
+  optionalAuthenticate,
   authenticatePage,
   requireRole,
   authenticateClient,

@@ -226,8 +226,12 @@ const openapi = {
     '/api/auth/register': {
       post: {
         tags: ['Auth'],
-        summary: 'Register a new user (role: viewer)',
-        security: [],
+        summary: 'Create a user (admin only, unless ALLOW_REGISTRATION=true)',
+        description:
+          'Closed by default. With an admin bearer token: creates a user (role admin|viewer, default viewer) ' +
+          'and returns it without a token. Anonymous: only when ALLOW_REGISTRATION=true, creates a viewer and ' +
+          'returns a JWT + token cookie. Failed attempts are rate-limited per IP.',
+        security: [{}, { BearerAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -238,15 +242,18 @@ const openapi = {
                 properties: {
                   email: { type: 'string', format: 'email' },
                   password: { type: 'string', minLength: 8 },
+                  role: { type: 'string', enum: ['admin', 'viewer'], description: 'Admin callers only' },
                 },
               },
             },
           },
         },
         responses: {
-          201: { description: 'Created — returns JWT + sets token cookie' },
-          400: { description: 'Invalid email/password' },
+          201: { description: 'Created — anonymous: JWT + token cookie; admin: user only' },
+          400: { description: 'Invalid email/password/role' },
+          403: { description: 'Registration is disabled' },
           409: { description: 'Email already registered' },
+          429: { description: 'Too many failed attempts' },
         },
       },
     },
@@ -273,6 +280,7 @@ const openapi = {
         responses: {
           200: { description: 'JWT + token cookie' },
           401: { description: 'Invalid credentials' },
+          429: { description: 'Too many failed attempts' },
         },
       },
     },

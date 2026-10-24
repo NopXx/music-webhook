@@ -299,6 +299,16 @@ Webhook Request
 | `SPOTIFY_FETCH_AUDIO_FEATURES` | ดึง audio features จาก Spotify (เพิ่ม API calls) | `false` |
 | `LASTFM_API_KEY` | API key สำหรับ Last.fm (optional) | — |
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | `*` |
+| `ALLOW_REGISTRATION` | เปิดให้สมัครสมาชิกเองผ่าน `POST /api/auth/register` (ได้ role `viewer`) — ต้องเป็น `true` เท่านั้นถึงจะเปิด | `false` |
+| `AUTH_RATE_LIMIT_MAX` | จำนวนครั้งที่ login/register **ล้มเหลว** ได้ต่อ IP ใน 15 นาที ก่อนโดน 429 | `10` |
+
+### การสมัครสมาชิกและ Login
+
+- การสมัครสมาชิกแบบสาธารณะ **ปิดไว้เป็นค่าเริ่มต้น** — `POST /api/auth/register` จะตอบ `403` ถ้าไม่ได้ตั้ง `ALLOW_REGISTRATION=true`
+- Admin สร้างผู้ใช้ได้เสมอ: เรียก `POST /api/auth/register` พร้อม `Authorization: Bearer <admin token>` และ body `{ "email", "password", "role"? }` (`role` เป็น `viewer` หรือ `admin`, default `viewer`) — จะไม่ออก token หรือเปลี่ยน cookie ของ admin
+- Admin คนแรกสร้างอัตโนมัติตอน boot จาก `ADMIN_EMAIL` / `ADMIN_PASSWORD` (ไม่ขึ้นกับ `ALLOW_REGISTRATION`)
+- `/api/auth/login` และ `/api/auth/register` มี rate limit นับเฉพาะครั้งที่ล้มเหลว (`AUTH_RATE_LIMIT_MAX`) แยกตาม IP — ถ้ามี server อื่น proxy การ login มา ควรส่ง `X-Forwarded-For` ของ client จริงด้วย ไม่งั้นผู้ใช้ทุกคนจะนับรวมเป็น IP เดียว
+- การรับ scrobble ด้วย API key (`x-api-key` / `?api_key=`) ไม่ได้รับผลกระทบ
 
 ## Migration จาก Schema เก่า
 
