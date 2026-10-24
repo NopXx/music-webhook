@@ -11,6 +11,7 @@ const REDIS_TTL = 86400;                       // 1 day Redis TTL
 const STALE_MS = 60 * 1000;                    // heartbeat window for "active"
 const CLEANUP_MS = 30 * 60 * 1000;             // drop a source after this idle
 const HYDRATE_STALE_MS = 10 * 60 * 1000;
+const END_GRACE_S = 10;                         // players report lengths a few seconds off
 
 const reviveEntry = (entry) => {
   if (!entry) return null;
@@ -218,11 +219,15 @@ class UserNowPlaying {
       progress = null;
     }
 
-    const startedAt = trackData.startTimestamp
-      ? new Date(trackData.startTimestamp)
-      : (progress != null
-          ? new Date(now.getTime() - progress * 1000)
-          : now);
+    // A reported position beats the original start time: after a pause or an ad
+    // the start time is too early and would end the song before it finishes.
+    const startedAt = typeof trackData.currentTime === 'number'
+      ? new Date(now.getTime() - trackData.currentTime * 1000)
+      : trackData.startTimestamp
+        ? new Date(trackData.startTimestamp)
+        : (progress != null
+            ? new Date(now.getTime() - progress * 1000)
+            : now);
 
     this.sources.set(key, {
       status: 'playing',
@@ -354,10 +359,15 @@ class UserNowPlaying {
 
     let playing = status === 'playing';
     const elapsed = startedAt ? Math.floor((now - startedAt) / 1000) : null;
+    // Where the player is now: its last reported position plus the time since,
+    // or the wall clock since the start when it never reported one.
+    const position = typeof progressSeconds === 'number'
+      ? progressSeconds + Math.floor((now - lastUpdate) / 1000)
+      : elapsed;
 
     if (playing) {
-      if (track.duration && elapsed != null) {
-        if (elapsed > track.duration) playing = false;
+      if (track.duration && position != null) {
+        if (position > track.duration + END_GRACE_S) playing = false;
       } else if (now - lastUpdate > 10 * 60 * 1000) {
         playing = false;
       }
@@ -365,11 +375,7 @@ class UserNowPlaying {
 
     let progress = null;
     if (playing) {
-      if (typeof progressSeconds === 'number') {
-        progress = progressSeconds + Math.floor((now - lastUpdate) / 1000);
-      } else if (elapsed != null) {
-        progress = elapsed;
-      }
+      progress = position;
       if (track.duration && typeof progress === 'number') {
         progress = Math.min(progress, track.duration);
       }
